@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>整顿职场 · 文字冒险 Demo</title>
+<style>
+  :root {
+    --bg: #14161d;
+    --paper: #1b1e28;
+    --ink: #cfd3dd;
+    --dim: #6b7080;
+    --accent: #e8b34b;      /* 可互动词 */
+    --accent-dim: #8a6d34;  /* 已用过的词 */
+    --get: #f0c969;         /* 获得道具 */
+    --obj: #e86a5e;         /* 反击/异议 */
+    --testi: #d98fb6;       /* 王总发言 */
+    --hp: #e86a5e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
+    font-size: 18px;
+    line-height: 2;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: linear-gradient(var(--bg) 75%, transparent);
+    padding: 14px 20px 18px;
+    text-align: center;
+    letter-spacing: .35em;
+    color: var(--dim);
+    font-size: 14px;
+  }
+  header a {
+    position: absolute; left: 18px; top: 14px;
+    color: var(--dim); text-decoration: none; letter-spacing: .1em;
+  }
+
+  /* —— Boss 血条 HUD（对质阶段出现） —— */
+  #hud {
+    display: none;
+    position: sticky; top: 46px; z-index: 6;
+    max-width: 620px; margin: 0 auto;
+    padding: 6px 24px 10px;
+    background: var(--bg);
+    border-bottom: 1px solid #2b2f3d;
+  }
+  #hud .row {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 14px;
+  }
+  #hud .bname { color: var(--testi); letter-spacing: .15em; white-space: nowrap; }
+  #hud .bar {
+    flex: 1; height: 10px; border-radius: 5px;
+    background: #2b2f3d; overflow: hidden;
+  }
+  #hud .bar i {
+    display: block; height: 100%; width: 100%;
+    background: linear-gradient(90deg, #c0392b, var(--hp));
+    transition: width .4s;
+  }
+  #hud .combo { color: var(--accent); white-space: nowrap; }
+  #hud .combo b { font-size: 18px; }
+  #hud .combo.pulse b { animation: pulse .25s; display: inline-block; }
+  @keyframes pulse { 50% { transform: scale(1.6); } }
+
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 8px 24px 150px;
+  }
+  main p { margin: 0 0 1.1em; animation: rise .5s ease both; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  p.think { color: var(--dim); font-size: 16px; }
+  p.get   { color: var(--get); }
+  p.testi {
+    color: var(--testi);
+    border-left: 3px solid var(--testi);
+    padding-left: 14px;
+  }
+  p.obj {
+    color: var(--obj);
+    font-weight: bold;
+    font-size: 22px;
+    letter-spacing: .15em;
+  }
+  p.sys { color: var(--dim); text-align: center; }
+  p.divider {
+    text-align: center; color: var(--dim);
+    letter-spacing: .4em; margin: 2em 0;
+  }
+
+  .w {
+    color: var(--accent);
+    border-bottom: 1px dashed var(--accent);
+    padding: 0 1px;
+    cursor: pointer;
+    transition: text-shadow .2s, color .2s;
+  }
+  .w:hover { text-shadow: 0 0 10px rgba(232,179,75,.8); }
+  .w.used {
+    color: var(--accent-dim);
+    border-bottom-color: transparent;
+    cursor: default; text-shadow: none;
+  }
+  .w.shake { animation: shake .35s; display: inline-block; }
+  @keyframes shake {
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+
+  body.quake { animation: quake .3s; }
+  @keyframes quake {
+    25% { transform: translate(3px, -2px); }
+    50% { transform: translate(-3px, 2px); }
+    75% { transform: translate(2px, 1px); }
+  }
+
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    background: var(--paper);
+    border-top: 1px solid #2b2f3d;
+    padding: 8px 16px 14px;
+  }
+  #hintbar {
+    max-width: 620px; margin: 0 auto 6px;
+    font-size: 13px; color: var(--dim);
+    min-height: 20px; transition: color .2s;
+  }
+  #hintbar.flash { color: var(--accent); }
+  #inv {
+    max-width: 620px; margin: 0 auto;
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  }
+  #inv .label { font-size: 13px; color: var(--dim); letter-spacing: .2em; }
+  .chip {
+    border: 1px solid #3a3f50;
+    border-radius: 20px;
+    padding: 3px 14px;
+    font-size: 15px;
+    cursor: pointer;
+    user-select: none;
+    background: #20242f;
+    transition: all .15s;
+    animation: rise .4s ease both;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.sel {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(232,179,75,.35);
+  }
+
+  /* —— 标题页 —— */
+  #cover {
+    position: fixed; inset: 0; z-index: 10;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+    transition: opacity .8s;
+  }
+  #cover.hide { opacity: 0; pointer-events: none; }
+  #cover h1 {
+    font-size: 34px; letter-spacing: .3em;
+    color: var(--ink); margin: 0 0 8px; font-weight: normal;
+  }
+  #cover .sub { color: var(--dim); font-size: 14px; margin-bottom: 3em; }
+  #cover .lead { font-size: 18px; color: var(--ink); }
+
+  /* —— 连击战 —— */
+  #battle {
+    display: none;
+    position: fixed; inset: 0; z-index: 9;
+    background: rgba(10, 11, 16, .96);
+    flex-direction: column;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  #battle .top {
+    max-width: 620px; width: 100%;
+    margin: 0 auto; padding: 18px 24px 0;
+  }
+  #battle .vs { text-align: center; color: var(--dim); font-size: 13px; letter-spacing: .3em; margin-bottom: 14px; }
+  #arena { flex: 1; position: relative; overflow: hidden; }
+  .bubble {
+    position: absolute;
+    padding: 6px 16px;
+    border: 1px solid var(--accent);
+    border-radius: 22px;
+    color: var(--accent);
+    background: rgba(27, 30, 40, .92);
+    font-size: 17px;
+    cursor: pointer;
+    white-space: nowrap;
+    animation: pop .2s ease both;
+    box-shadow: 0 0 14px rgba(232,179,75,.25);
+  }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } }
+  .bubble.hit {
+    pointer-events: none;
+    border-color: var(--obj);
+    color: var(--obj);
+    animation: smash .35s ease both;
+  }
+  @keyframes smash {
+    to { transform: scale(1.8) rotate(6deg); opacity: 0; }
+  }
+  .bubble.expire { pointer-events: none; animation: fadeout .4s ease both; }
+  @keyframes fadeout { to { opacity: 0; transform: scale(.7); } }
+  #bcombo {
+    position: absolute; top: 14px; right: 20px;
+    text-align: right; color: var(--accent); z-index: 2;
+    pointer-events: none;
+  }
+  #bcombo b { font-size: 46px; line-height: 1; display: block; }
+  #bcombo.pulse b { animation: pulse .2s; }
+  #ko {
+    position: absolute; inset: 0; z-index: 3;
+    display: none; align-items: center; justify-content: center;
+    font-size: 72px; font-weight: bold; color: var(--obj);
+    letter-spacing: .2em; text-shadow: 0 0 30px rgba(232,106,94,.8);
+    pointer-events: none;
+    animation: pop .3s ease both;
+  }
+  #timebar {
+    height: 6px; background: #2b2f3d;
+  }
+  #timebar i {
+    display: block; height: 100%; width: 100%;
+    background: var(--accent);
+  }
+  #bhint {
+    text-align: center; color: var(--dim);
+    font-size: 13px; padding: 10px 0 16px;
+    background: var(--bg);
+  }
+
+  /* —— 结算 —— */
+  #result {
+    display: none;
+    position: fixed; inset: 0; z-index: 11;
+    background: var(--bg);
+    flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+  }
+  #result .label { color: var(--dim); font-size: 14px; letter-spacing: .4em; }
+  #grade {
+    font-size: 110px; font-weight: bold; line-height: 1.3;
+    animation: gradeIn .6s cubic-bezier(.2, 2, .4, 1) both .3s;
+  }
+  @keyframes gradeIn {
+    from { transform: scale(3); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+  }
+  #gtitle { font-size: 24px; letter-spacing: .25em; margin-bottom: 8px; }
+  #gcombo { color: var(--accent); margin-bottom: 4px; }
+  #gflavor { color: var(--dim); font-size: 15px; max-width: 420px; line-height: 2; }
+  #gend { margin-top: 2.5em; font-size: 16px; max-width: 460px; line-height: 2.2; }
+  #result .ops { margin-top: 3em; font-size: 18px; }
+  #result .ops .w { margin: 0 14px; }
+</style>
+</head>
+<body>
+
+<div id="cover">
+  <h1>整顿职场</h1>
+  <div class="sub">职场爽文 · 连击玩法 DEMO</div>
+  <div class="lead">
+    凌晨一点，第八版方案，没有加班费。<br>
+    受够了吗？<br><br>
+    那就<span class="w" id="startword">摔下</span>这份周报，开始反击。
+  </div>
+</div>
+
+<header>整 顿 职 场
+  <a href="./">← 选剧本</a>
+</header>
+
+<div id="hud">
+  <div class="row">
+    <span class="bname">部门经理 · 王建国</span>
+    <span class="bar"><i id="hpfill"></i></span>
+    <span class="combo" id="hudcombo">COMBO <b>0</b></span>
+  </div>
+</div>
+
+<main id="log"></main>
+
+<footer>
+  <div id="hintbar"></div>
+  <div id="inv"><span class="label">道具</span></div>
+</footer>
+
+<!-- —— 连击战界面 —— -->
+<div id="battle">
+  <div class="top"><div class="vs">最 终 对 决</div></div>
+  <div id="arena">
+    <div id="bcombo">COMBO<b>0</b></div>
+    <div id="ko">K.O.</div>
+  </div>
+  <div id="timebar"><i id="timefill"></i></div>
+  <div id="bhint">点击弹出的词，把憋了三年的话全部说出去！</div>
+</div>
+
+<!-- —— 结算界面 —— -->
+<div id="result">
+  <div class="label">—— 战 斗 评 级 ——</div>
+  <div id="grade">S</div>
+  <div id="gtitle">部门战神</div>
+  <div id="gcombo">总连击 × 0</div>
+  <div id="gflavor"></div>
+  <div id="gend"></div>
+  <div class="ops">
+    <span class="w" data-act="retry">再战一次</span>
+    <span class="w" data-act="home">返回选剧本</span>
+  </div>
+</div>
+
+<script>
+/* ====================================================================
+ *  引擎部分（与《雨夜的书房》同款，多了 Boss 血条与连击战）
+ *  文本标记：[词语|动作id]，动作写在下方 ACTIONS 里
+ * ================================================================== */
+
+const $log  = document.getElementById('log');
+const $inv  = document.getElementById('inv');
+const $hint = document.getElementById('hintbar');
+
+const F = {};
+const bag = [];
+let selected = null;
+
+function fmt(s) {
+  return s.replace(/\[([^\]|]+)(?:\|([^\]]+))?\]/g,
+    (_, word, id) => `<span class="w" data-act="${id || word}">${word}</span>`);
+}
+
+function say(text, cls) {
+  const p = document.createElement('p');
+  if (cls) p.className = cls;
+  p.innerHTML = fmt(text);
+  $log.appendChild(p);
+  p.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return p;
+}
+const think   = t => say('（' + t + '）', 'think');
+const divider = t => say('— ' + t + ' —', 'divider');
+
+function off(id) {
+  document.querySelectorAll(`.w[data-act="${id}"]`)
+    .forEach(el => el.classList.add('used'));
+}
+function has(id) { return bag.includes(id); }
+
+function addItem(id) {
+  if (has(id)) return;
+  bag.push(id);
+  const it = ITEMS[id];
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.dataset.item = id;
+  chip.title = it.desc;
+  chip.textContent = it.icon + ' ' + it.name;
+  chip.onclick = () => select(selected === id ? null : id);
+  $inv.appendChild(chip);
+  say('【获得证据：' + it.name + '】', 'get');
+}
+
+function select(id) {
+  selected = id;
+  document.querySelectorAll('.chip').forEach(c =>
+    c.classList.toggle('sel', c.dataset.item === id));
+  hint(id ? '正在出示：' + ITEMS[id].name + ' —— 点击发言里对应的词，当众甩出证据' : '');
+}
+
+let hintTimer = null;
+function hint(t, flash) {
+  $hint.textContent = t;
+  $hint.classList.toggle('flash', !!flash);
+  clearTimeout(hintTimer);
+  if (flash) hintTimer = setTimeout(() => {
+    $hint.classList.remove('flash');
+    $hint.textContent = selected
+      ? '正在出示：' + ITEMS[selected].name + ' —— 点击发言里对应的词' : '';
+  }, 2600);
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('.w[data-act]');
+  if (!el || el.classList.contains('used')) return;
+  const act = ACTIONS[el.dataset.act];
+  if (!act) return;
+  if (selected) {
+    const fn = act.items && act.items[selected];
+    if (fn) { fn(); select(null); }
+    else {
+      el.classList.remove('shake'); void el.offsetWidth;
+      el.classList.add('shake');
+      hint('（现在甩出' + ITEMS[selected].name + '，火候不对。）', true);
+    }
+  } else if (act.click) {
+    act.click();
+  }
+});
+
+/* —— Boss 血条 & 连击 —— */
+let hp = 100, combo = 0;
+const $hpfill = document.getElementById('hpfill');
+const $hudcombo = document.getElementById('hudcombo');
+
+function damage(n) {
+  hp = Math.max(0, hp - n);
+  $hpfill.style.width = hp + '%';
+  document.body.classList.remove('quake'); void document.body.offsetWidth;
+  document.body.classList.add('quake');
+}
+function addCombo(n) {
+  combo += n;
+  $hudcombo.innerHTML = 'COMBO <b>' + combo + '</b>';
+  $hudcombo.classList.remove('pulse'); void $hudcombo.offsetWidth;
+  $hudcombo.classList.add('pulse');
+}
+
+/* ====================================================================
+ *  连击战：限时弹词，点击越多连击越高，打空血条直接 K.O.
+ * ================================================================== */
+const BATTLE_MS  = 12000;  // 总时长
+const SPAWN_MS   = 520;    // 弹词间隔
+const BUBBLE_MS  = 1500;   // 每个词的存活时间
+const HIT_DMG    = 2;      // 每次点击伤害
+
+const PHRASES = [
+  '加班费呢？', '我的年假呢？', '画的饼自己吃吧', 'PUA 到此为止',
+  '周报你自己写', '这锅我不背', '水印是我的工号', '养生会所玩得开心吗',
+  '优化名单收好', '功劳还给我', '我！不！干！了！', '对齐你自己颗粒度',
+  '别再@我了', '需求别拍脑袋', '会议室还你了',
+];
+
+const $battle = document.getElementById('battle');
+const $arena  = document.getElementById('arena');
+const $bcombo = document.getElementById('bcombo');
+const $timefill = document.getElementById('timefill');
+
+function startBattle() {
+  $battle.style.display = 'flex';
+  const start = performance.now();
+  let over = false;
+  const $hudClone = document.getElementById('hud');
+  $battle.querySelector('.top').appendChild($hudClone); // 血条挪进战斗界面
+
+  function syncCombo() {
+    $bcombo.innerHTML = 'COMBO<b>' + combo + '</b>';
+    $bcombo.classList.remove('pulse'); void $bcombo.offsetWidth;
+    $bcombo.classList.add('pulse');
+  }
+  syncCombo();
+
+  function spawn() {
+    if (over) return;
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+    $arena.appendChild(b);
+    const pad = 14;
+    b.style.left = pad + Math.random() * Math.max(0, $arena.clientWidth - b.offsetWidth - pad * 2) + 'px';
+    b.style.top  = 70 + Math.random() * Math.max(0, $arena.clientHeight - b.offsetHeight - 90) + 'px';
+    const life = setTimeout(() => { b.classList.add('expire'); setTimeout(() => b.remove(), 400); }, BUBBLE_MS);
+    b.addEventListener('pointerdown', () => {
+      if (over || b.classList.contains('hit')) return;
+      clearTimeout(life);
+      b.classList.add('hit');
+      setTimeout(() => b.remove(), 350);
+      addCombo(1); syncCombo();
+      damage(HIT_DMG);
+      if (hp <= 0) finish(true);
+    });
+  }
+
+  const spawner = setInterval(spawn, SPAWN_MS);
+  spawn();
+
+  function tick(now) {
+    if (over) return;
+    const left = Math.max(0, 1 - (now - start) / BATTLE_MS);
+    $timefill.style.width = left * 100 + '%';
+    if (left <= 0) finish(false);
+    else requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  function finish(ko) {
+    over = true;
+    clearInterval(spawner);
+    if (ko) {
+      addCombo(5); syncCombo();          // K.O. 奖励连击
+      document.getElementById('ko').style.display = 'flex';
+    }
+    setTimeout(showResult, ko ? 1400 : 600);
+  }
+}
+
+/* —— 评级 —— */
+const RANKS = [
+  { min: 30, grade: 'SSS', color: '#ffd75e', title: '职场传说',   flavor: '你的事迹将在茶水间流传十年。保安鼓掌，保洁阿姨为你递上纸巾。' },
+  { min: 24, grade: 'S',   color: '#f0c969', title: '部门战神',   flavor: '全组起立鼓掌，掌声持续了整整三分钟。' },
+  { min: 16, grade: 'A',   color: '#6fd3c7', title: '整顿职场',   flavor: '「00 后整顿职场」，说的就是你。' },
+  { min: 8,  grade: 'B',   color: '#7ea6e0', title: '忍无可忍',   flavor: '怼得不错，但下次可以更狠一点。' },
+  { min: 0,  grade: 'C',   color: '#6b7080', title: '还是太老实', flavor: '心里的话，终究只说出来三成。' },
+];
+
+function showResult() {
+  const r = RANKS.find(r => combo >= r.min);
+  document.getElementById('grade').textContent = r.grade;
+  document.getElementById('grade').style.color = r.color;
+  document.getElementById('grade').style.textShadow = '0 0 40px ' + r.color + '88';
+  document.getElementById('gtitle').textContent = '「' + r.title + '」';
+  document.getElementById('gtitle').style.color = r.color;
+  document.getElementById('gcombo').textContent = '总连击 × ' + combo;
+  document.getElementById('gflavor').textContent = r.flavor;
+  document.getElementById('gend').innerHTML =
+    '会议室死一般地寂静。大老板缓缓站起身，说出了那句话：<br>' +
+    '「王建国，停职审查。」<br>' +
+    '然后他看向你：「年轻人，下周一，经理办公室见。」';
+  $battle.style.display = 'none';
+  document.getElementById('result').style.display = 'flex';
+}
+
+/* ====================================================================
+ *  剧情部分
+ * ================================================================== */
+
+const ITEMS = {
+  shot: { icon: '📱', name: '聊天记录', desc: '王总把你的方案换上自己的名字发给了大老板，每一页都有你的工号水印。' },
+  bill: { icon: '🧾', name: '报销单',   desc: '团建经费八千八，消费地点「君悦养生会所」，审批人王建国。' },
+  list: { icon: '📋', name: '优化名单', desc: '人事部优化名单初稿，王建国签发。你的备注是「性价比低」。' },
+};
+
+/* —— 第一幕：深夜工位 —— */
+function scene1() {
+  divider('深夜 · 工位');
+  say('凌晨一点十四分。整层楼只剩你工位的灯还亮着。');
+  say('屏幕上是第八版方案，标题旁躺着王总的最新批注：「重写。明早要。」');
+  say('你揉了揉眼睛。[手机|phone]震了一下。茶水间方向传来[打印机|printer]的嗡嗡声，脚边的[垃圾桶|bin]里塞满了外卖盒。');
+  hint('提示：点击文中发亮的词语来互动。', true);
+}
+
+function checkReady() {
+  if (F.ready) return;
+  if (!(has('shot') && has('bill') && has('list'))) return;
+  F.ready = true;
+  say('你看着屏幕上「重写。明早要。」四个字，忽然笑了。');
+  think('明天上午，全员大会，大老板也在……好啊，那就明天。');
+  say('窗外，[天亮了|tomorrow]。');
+}
+
+/* —— 第二幕：全员大会 —— */
+function scene2() {
+  divider('次日 · 全员大会');
+  document.getElementById('hud').style.display = 'block';
+  $hpfill.style.width = '100%';
+  say('会议室坐得满满当当，大老板陈总坐在最后一排。王总站在台上，红光满面。');
+  say('「这个季度部门业绩不达标，我，痛心啊。」', 'testi');
+  say('「归根结底，是[方案|t1]不行！有些年轻人，改了八版都拿不出手！」', 'testi');
+  think('来了。选中一件证据，点击他发言里对应的词，当众甩出去。');
+}
+
+const ACTIONS = {
+
+  /* ---------- 第一幕 ---------- */
+  phone: {
+    click() {
+      off('phone');
+      say('部门群炸开了锅——十分钟前，王总把「他的」新方案发给了陈总，全员可见。');
+      say('你点开一看，血压先于困意上来了：每一页都是你做的第七版，只是封面的名字换成了王建国。');
+      say('你深吸一口气，把每一页都[截了图|pickShot]。');
+    }
+  },
+  pickShot: { click() { off('pickShot'); addItem('shot'); checkReady(); } },
+
+  printer: {
+    click() {
+      off('printer');
+      say('打印机里躺着一沓没人取走的纸：人事部优化名单初稿，签发人王建国。');
+      say('从上往下数，第三行就是你的名字。备注栏写着：「性价比低，建议优化」。');
+      say('你的手停了两秒，然后[拿走了它|pickList]。');
+    }
+  },
+  pickList: { click() { off('pickList'); addItem('list'); checkReady(); } },
+
+  bin: {
+    click() {
+      off('bin');
+      say('外卖盒底下，压着一张被揉皱又展平过的[报销单|pickBill]。');
+    }
+  },
+  pickBill: {
+    click() {
+      off('pickBill');
+      say('团建经费八千八，审批人王建国，消费明细：「君悦养生会所」。');
+      say('而全组的团建，去年就已经「因为经费紧张」停办了。');
+      addItem('bill');
+      checkReady();
+    }
+  },
+
+  tomorrow: { click() { off('tomorrow'); scene2(); } },
+
+  /* ---------- 第二幕：三连举证 ---------- */
+  t1: {
+    click() { hint('（空口对线不够——选中下方的证据，再点击这个词。）', true); },
+    items: {
+      shot() {
+        off('t1');
+        say('——等一下。', 'obj');
+        say('你站了起来。整个会议室刷地安静。');
+        say('「方案不行？王总，您昨晚发给陈总的那份『您的方案』，麻烦当众翻到任何一页——右下角的水印，是我的工号。」');
+        say('投影幕布上，聊天记录一页一页翻过。有人开始倒吸冷气。');
+        damage(20); addCombo(5);
+        say('「截、截图能说明什么！再说部门经费紧张，还不是因为有人[铺张浪费|t2]……」', 'testi');
+      }
+    }
+  },
+
+  t2: {
+    click() { hint('（说到浪费……你手里正好有一张单子。）', true); },
+    items: {
+      bill() {
+        off('t2');
+        say('——哦？浪费？', 'obj');
+        say('「君悦养生会所，八千八，审批人王建国。」你扬了扬手里的报销单。「走的是团建经费——可咱们组的团建，去年就停办了。大家说，是吗？」');
+        say('全组齐刷刷地点头。陈总的眉毛挑了起来。');
+        damage(20); addCombo(5);
+        say('「你！你这是恶意中伤！信不信我让你今天就[滚出|t3]这家公司！」', 'testi');
+      }
+    }
+  },
+
+  t3: {
+    click() { hint('（他想让你滚？你手里有份名单，正好聊聊这个。）', true); },
+    items: {
+      list() {
+        off('t3');
+        say('——您是说，像这份名单一样吗？', 'obj');
+        say('你把优化名单拍在桌上。「性价比低，建议优化。王总，全组十二个人，您一口气写了九个。」');
+        say('「合着业绩是您的，锅是我们的，优化名单上全是干活的人。」');
+        damage(20); addCombo(5);
+        say('王建国脸色惨白，手指着你，嘴唇哆嗦着还想狡辩——');
+        think('机会来了！趁他破防，把憋了三年的话全部说出去！');
+        say('[发起总攻|fight]', 'obj');
+      }
+    }
+  },
+
+  fight: { click() { off('fight'); startBattle(); } },
+
+  /* ---------- 结算 ---------- */
+  retry: { click() { location.reload(); } },
+  home:  { click() { location.href = './'; } },
+};
+
+/* —— 标题页 —— */
+document.getElementById('startword').onclick = () => {
+  document.getElementById('cover').classList.add('hide');
+  scene1();
+};
+</script>
+</body>
+</html>
