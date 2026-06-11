@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>雨夜的书房 · 文字冒险 Demo</title>
+<style>
+  :root {
+    --bg: #14161d;
+    --paper: #1b1e28;
+    --ink: #cfd3dd;
+    --dim: #6b7080;
+    --accent: #e8b34b;      /* 可互动词 */
+    --accent-dim: #8a6d34;  /* 已用过的词 */
+    --clue: #6fd3c7;        /* 线索 */
+    --get: #f0c969;         /* 获得道具 */
+    --obj: #e86a5e;         /* 异议/反驳 */
+    --testi: #9fc97e;       /* 证词 */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
+    font-size: 18px;
+    line-height: 2;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: linear-gradient(var(--bg) 75%, transparent);
+    padding: 14px 20px 18px;
+    text-align: center;
+    letter-spacing: .35em;
+    color: var(--dim);
+    font-size: 14px;
+  }
+
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 8px 24px 150px; /* 底部给道具栏留位置 */
+  }
+
+  main p {
+    margin: 0 0 1.1em;
+    animation: rise .5s ease both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* —— 段落样式 —— */
+  p.think  { color: var(--dim); font-size: 16px; }
+  p.get    { color: var(--get); }
+  p.clue   { color: var(--clue); }
+  p.testi  {
+    color: var(--testi);
+    border-left: 3px solid var(--testi);
+    padding-left: 14px;
+  }
+  p.obj {
+    color: var(--obj);
+    font-weight: bold;
+    font-size: 22px;
+    letter-spacing: .15em;
+  }
+  p.sys { color: var(--dim); text-align: center; }
+  p.divider {
+    text-align: center; color: var(--dim);
+    letter-spacing: .4em; margin: 2em 0;
+  }
+
+  /* —— 可互动的词 —— */
+  .w {
+    color: var(--accent);
+    border-bottom: 1px dashed var(--accent);
+    padding: 0 1px;
+    cursor: pointer;
+    transition: text-shadow .2s, color .2s;
+  }
+  .w:hover { text-shadow: 0 0 10px rgba(232,179,75,.8); }
+  .w.used {
+    color: var(--accent-dim);
+    border-bottom-color: transparent;
+    cursor: default; text-shadow: none;
+  }
+  .w.shake { animation: shake .35s; display: inline-block; }
+  @keyframes shake {
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+
+  /* —— 底部：提示条 + 道具栏 —— */
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    background: var(--paper);
+    border-top: 1px solid #2b2f3d;
+    padding: 8px 16px 14px;
+  }
+  #hintbar {
+    max-width: 620px; margin: 0 auto 6px;
+    font-size: 13px; color: var(--dim);
+    min-height: 20px; transition: color .2s;
+  }
+  #hintbar.flash { color: var(--accent); }
+  #inv {
+    max-width: 620px; margin: 0 auto;
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  }
+  #inv .label { font-size: 13px; color: var(--dim); letter-spacing: .2em; }
+  .chip {
+    border: 1px solid #3a3f50;
+    border-radius: 20px;
+    padding: 3px 14px;
+    font-size: 15px;
+    cursor: pointer;
+    user-select: none;
+    background: #20242f;
+    transition: all .15s;
+    animation: rise .4s ease both;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.sel {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(232,179,75,.35);
+  }
+
+  /* —— 标题页 —— */
+  #cover {
+    position: fixed; inset: 0; z-index: 10;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+    transition: opacity .8s;
+  }
+  #cover.hide { opacity: 0; pointer-events: none; }
+  #cover h1 {
+    font-size: 34px; letter-spacing: .3em;
+    color: var(--ink); margin: 0 0 8px; font-weight: normal;
+  }
+  #cover .sub { color: var(--dim); font-size: 14px; margin-bottom: 3em; }
+  #cover .lead { font-size: 18px; color: var(--ink); }
+</style>
+</head>
+<body>
+
+<div id="cover">
+  <h1>雨夜的书房</h1>
+  <div class="sub">文字冒险 · 玩法 DEMO</div>
+  <div class="lead">
+    在这个故事里，文字本身就是世界。<br>
+    想做什么，就点击那个<span style="color:var(--accent)">发亮的词</span>。<br><br>
+    现在，<span class="w" id="startword">推开</span>这扇通往故事的门。
+  </div>
+</div>
+
+<header>雨 夜 的 书 房</header>
+<main id="log"></main>
+
+<footer>
+  <div id="hintbar"></div>
+  <div id="inv"><span class="label">道具</span></div>
+</footer>
+
+<script>
+/* ====================================================================
+ *  引擎部分（一般不用动）
+ * ====================================================================
+ * 文本标记语法：
+ *   [词语|动作id]   → 可点击的词，点击触发 ACTIONS[动作id]
+ *   [词语]          → 同上，动作id 就是词语本身
+ * 每个动作可以定义：
+ *   click()         → 直接点击时
+ *   items: {道具id: fn}  → 选中某道具后点击该词时
+ * 常用函数：
+ *   say(text, cls)  输出一段文字   off(id) 把某词置灰失效
+ *   addItem(id)     获得道具       clue(t) 输出一条线索
+ *   hint(t)         底部提示条     think(t) 输出内心独白
+ * ================================================================== */
+
+const $log  = document.getElementById('log');
+const $inv  = document.getElementById('inv');
+const $hint = document.getElementById('hintbar');
+
+const F = {};            // 剧情 flag
+const bag = [];          // 已获得的道具 id
+let selected = null;     // 当前选中的道具 id
+
+function fmt(s) {
+  return s.replace(/\[([^\]|]+)(?:\|([^\]]+))?\]/g,
+    (_, word, id) => `<span class="w" data-act="${id || word}">${word}</span>`);
+}
+
+function say(text, cls) {
+  const p = document.createElement('p');
+  if (cls) p.className = cls;
+  p.innerHTML = fmt(text);
+  $log.appendChild(p);
+  p.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return p;
+}
+const think   = t => say('（' + t + '）', 'think');
+const clue    = t => say('【线索：' + t + '】', 'clue');
+const divider = t => say('— ' + t + ' —', 'divider');
+const objection = () => say('——等等！', 'obj');
+
+function off(id) {
+  document.querySelectorAll(`.w[data-act="${id}"]`)
+    .forEach(el => el.classList.add('used'));
+}
+
+function has(id) { return bag.includes(id); }
+
+function addItem(id) {
+  if (has(id)) return;
+  bag.push(id);
+  const it = ITEMS[id];
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.dataset.item = id;
+  chip.title = it.desc;
+  chip.textContent = it.icon + ' ' + it.name;
+  chip.onclick = () => select(selected === id ? null : id);
+  $inv.appendChild(chip);
+  say('【获得道具：' + it.name + '】', 'get');
+}
+
+function select(id) {
+  selected = id;
+  document.querySelectorAll('.chip').forEach(c =>
+    c.classList.toggle('sel', c.dataset.item === id));
+  hint(id ? '正在出示：' + ITEMS[id].name + ' —— 点击文中的词来使用它，再点一次道具取消'
+          : '');
+}
+
+let hintTimer = null;
+function hint(t, flash) {
+  $hint.textContent = t;
+  $hint.classList.toggle('flash', !!flash);
+  clearTimeout(hintTimer);
+  if (flash) hintTimer = setTimeout(() => {
+    $hint.classList.remove('flash');
+    $hint.textContent = selected
+      ? '正在出示：' + ITEMS[selected].name + ' —— 点击文中的词来使用它' : '';
+  }, 2600);
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('.w[data-act]');
+  if (!el || el.classList.contains('used')) return;
+  const act = ACTIONS[el.dataset.act];
+  if (!act) return;
+  if (selected) {
+    const fn = act.items && act.items[selected];
+    if (fn) { fn(); select(null); }
+    else {
+      el.classList.remove('shake'); void el.offsetWidth;
+      el.classList.add('shake');
+      hint('（' + ITEMS[selected].name + '对它没什么用。）', true);
+    }
+  } else if (act.click) {
+    act.click();
+  }
+});
+
+/* ====================================================================
+ *  剧情部分（故事都写在下面，随便改）
+ * ================================================================== */
+
+const ITEMS = {
+  key:    { icon: '🗝️', name: '黄铜钥匙', desc: '埋在盆栽里的钥匙。谁会把钥匙藏在这种地方？' },
+  torch:  { icon: '🔦', name: '手电筒',   desc: '书桌抽屉里的手电筒，电量还足。' },
+  policy: { icon: '📄', name: '保险单',   desc: '舅舅上周刚为古董怀表投保三十万的保单。' },
+};
+
+/* —— 第一幕：走廊 —— */
+function scene1() {
+  divider('走廊');
+  say('深夜两点，一声闷响把你惊醒。');
+  say('走廊尽头，舅舅书房的门缝里透出灯光。你蹑手蹑脚地走过去，站在[门|door]前。' +
+      '走廊里只有一盆枯萎的[盆栽|pot]，和一幅微微歪斜的[挂画|painting]。');
+  hint('提示：点击文中发亮的词语来互动。', true);
+}
+
+/* —— 第二幕：书房 —— */
+function scene2() {
+  divider('书房');
+  say('书房里空无一人。[窗户|window]大开着，雨点斜斜地打在窗台上。' +
+      '[书桌|desk]上散落着纸页，台灯还亮着。' +
+      '墙角堆着杂物，沉在一团浓重的[阴影|shadow]里。' +
+      '一整面[书架|shelf]占据了北墙。');
+}
+
+/* 集齐三条线索 + 保险单后，舅舅登场 */
+function checkUncle() {
+  if (F.uncle) return;
+  if (!(F.clueWindow && F.clueFootprints && F.clueWatch && has('policy'))) return;
+  F.uncle = true;
+  say('身后传来趿趿踏踏的脚步声。');
+  say('舅舅披着睡衣出现在门口，脸色发白：「哎呀……是你啊。大半夜的，出、出什么事了？」');
+  think('他的话里一定有破绽。先听他[把话说完|testify]，再指出矛盾。');
+}
+
+/* —— 第三幕：对质 —— */
+function scene3() {
+  divider('对质');
+  say('「我一直在卧室睡觉，怀表的事我什么都不知道。」', 'testi');
+  say('「一定是小偷干的！从[窗户|tWindow]爬进来，偷走了我的传家宝！」', 'testi');
+  think('戳破证词：点击站不住脚的词；有的矛盾需要先选中一件道具，再点击证词里对应的词。');
+}
+
+const ACTIONS = {
+
+  /* ---------- 第一幕 ---------- */
+  door: {
+    click() {
+      if (!F.knocked) {
+        F.knocked = true;
+        say('咚咚咚。你敲了敲门——没有回应。试着转动把手，门从里面反锁了。');
+        think('钥匙会不会就藏在附近？');
+      } else {
+        say('门锁得很死。蛮力是侦探最后的手段，而你还有别的地方没查。');
+      }
+    },
+    items: {
+      key() {
+        off('door'); off('pot'); off('painting');
+        say('钥匙插进锁孔，「咔哒」一声轻响。你深吸一口气，推开了门。');
+        scene2();
+      }
+    }
+  },
+
+  pot: {
+    click() {
+      off('pot');
+      say('你拨开枯脆的叶子。泥土里埋着一样东西——一把[黄铜钥匙|pickKey]。');
+    }
+  },
+  pickKey: { click() { off('pickKey'); addItem('key'); } },
+
+  painting: {
+    click() {
+      off('painting');
+      say('你扶正挂画。画框背面有一行铅笔小字：「四月，记得续保。」');
+      think('续保……保险吗？先记在心里。');
+    }
+  },
+
+  /* ---------- 第二幕 ---------- */
+  window: {
+    click() {
+      off('window');
+      F.clueWindow = true;
+      say('窗台上积着雨水。可窗外是笔直的三楼外墙——没有水管，没有脚手架，砖缝里也没有任何攀爬的痕迹。');
+      clue('没有人能从窗户进出');
+      checkUncle();
+    }
+  },
+
+  desk: {
+    click() {
+      off('desk');
+      say('台灯的灯罩还是温热的——人离开不久。纸堆里压着一张[保险单|pickPolicy]，书桌侧面还有一个半开的[抽屉|drawer]。');
+    }
+  },
+  pickPolicy: {
+    click() {
+      off('pickPolicy');
+      say('怀表保险单：投保人是舅舅本人，保额三十万，上周刚刚生效。');
+      addItem('policy');
+      checkUncle();
+    }
+  },
+  drawer: {
+    click() {
+      off('drawer');
+      say('抽屉里躺着一支[手电筒|pickTorch]，还有半盒受潮的火柴。');
+    }
+  },
+  pickTorch: { click() { off('pickTorch'); addItem('torch'); } },
+
+  shadow: {
+    click() {
+      say('墙角太暗了，什么也看不清。');
+      think('要是有光源就好了。');
+    },
+    items: {
+      torch() {
+        off('shadow');
+        F.clueFootprints = true;
+        say('光束扫过墙角——地毯上印着一串泥泞的脚印，从书架一路延伸到门口。纹路很浅，是拖鞋。');
+        clue('穿拖鞋的人，从书架走向门口');
+        checkUncle();
+      }
+    }
+  },
+
+  shelf: {
+    click() {
+      off('shelf');
+      say('书脊排得整整齐齐，一丝不苟。唯独一本《[航海日志|logbook]》，上下颠倒地插在那里。');
+    }
+  },
+  logbook: {
+    click() {
+      off('logbook');
+      F.clueWatch = true;
+      say('你抽出那本书。书架深处「咔」地一声，弹开一个暗格——天鹅绒衬底上，只剩一个怀表形状的凹槽。怀表不见了。');
+      clue('暗格里的怀表被人取走了');
+      checkUncle();
+    }
+  },
+
+  testify: { click() { off('testify'); scene3(); } },
+
+  /* ---------- 第三幕：逐句反驳 ---------- */
+  tWindow: {
+    click() {
+      off('tWindow');
+      objection();
+      say('「窗外是笔直的三楼外墙，没有任何攀爬的痕迹。小偷不可能从窗户进出！」');
+      say('舅舅的额角渗出汗珠：「那、那就是从门进来的！可书房的[钥匙|tKey]只有我随身带着……奇怪，真是奇怪……」', 'testi');
+    }
+  },
+
+  tKey: {
+    click() { hint('（光指出这个词还不够——拿出对应的证据。）', true); },
+    items: {
+      key() {
+        off('tKey');
+        objection();
+        say('你举起那把黄铜钥匙。「奇怪吗？这把钥匙，就埋在书房门口的盆栽里。把它藏在那里的人，随时可以自由出入——比如说，您。」');
+        say('「我、我为什么要偷偷进自己的书房！你看我，我刚从被窝里爬出来！」舅舅裹紧睡衣，脚上还趿着一双[拖鞋|tSlipper]。', 'testi');
+      }
+    }
+  },
+
+  tSlipper: {
+    click() {
+      off('tSlipper');
+      objection();
+      say('「刚从被窝里出来的人，拖鞋底为什么沾着泥？」你指向墙角。「地毯上那串拖鞋印，从暗格一直走到门口。尺码——恐怕正合您的脚。」');
+      say('「……就、就算我进过书房！可怀表确实丢了！我总不会偷自己的[怀表|tWatch]吧！」', 'testi');
+    }
+  },
+
+  tWatch: {
+    click() { hint('（动机……有一样道具，能说明他的动机。）', true); },
+    items: {
+      policy() {
+        off('tWatch');
+        objection();
+        say('「为了这个。」你把保险单拍在书桌上。「三十万保额，上周刚刚生效。怀表没有被偷——它只是需要『被偷』。」');
+        say('「自导自演的失窃案，骗的是保险公司的钱。挂画后面那句『记得续保』，也是您亲手写的吧。」');
+        say('舅舅瘫坐进椅子里，半晌，发出一声长长的叹息。窗外，雨停了。');
+        divider('真相大白');
+        say('DEMO 到此为止，感谢游玩。点击[重新开始|restart]再来一局。', 'sys');
+      }
+    }
+  },
+
+  restart: { click() { location.reload(); } },
+};
+
+/* —— 标题页 —— */
+document.getElementById('startword').onclick = () => {
+  document.getElementById('cover').classList.add('hide');
+  scene1();
+};
+</script>
+</body>
+</html>
