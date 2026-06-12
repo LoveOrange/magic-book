@@ -1,6 +1,9 @@
 /* ====================================================================
  *  魔法书剧本引擎 v0 —— 解析并运行 MBS 格式剧本（规范见 FORMAT.md）
  *  章节文本注册在 window.MB_SCRIPTS，由 game.html 选择加载。
+ *
+ *  展现模型：一场景一「页」。当前页内的互动就地展开；goto 解锁新页；
+ *  页码条支持回翻，含未读元素的页以高亮点提示。
  * ==================================================================== */
 'use strict';
 
@@ -115,25 +118,32 @@ function lintChapter(ch) {
 
 let CH = null;
 const STATE = {
-  scene: null,
+  scene: null,   // 推进前沿（最新解锁的页）
+  pages: [],     // 已解锁的页（场景 id，按解锁顺序）
+  seen: {},      // sceneId -> [点击过的词 id]
   flags: new Set(),
   items: [],
   clues: [],
   archive: [],   // {title, body}
-  mode: '',      // 当前渲染态（'' | 'memory'）
 };
+let viewScene = null;   // 当前正在查看的页
+let curScene = null;    // 当前正在写入的页（pump 执行期间设置）
 let selected = null;
+let IS_DRAFT = false;   // 草稿试玩：存档与正式进度隔离
 
 const $ = id => document.getElementById(id);
 
-let IS_DRAFT = false; // 草稿试玩：存档与正式进度隔离
+const SAVE_FMT = 2;
 
 function saveKey() { return 'mb-save-' + (IS_DRAFT ? 'draft-' : '') + CH.meta.id; }
 
 function saveGame() {
   localStorage.setItem(saveKey(), JSON.stringify({
+    fmt: SAVE_FMT,
     v: CH.meta.version,
     scene: STATE.scene,
+    pages: STATE.pages,
+    seen: STATE.seen,
     flags: [...STATE.flags],
     items: STATE.items,
     clues: STATE.clues,
@@ -146,8 +156,87 @@ function saveGame() {
 }
 
 function loadSave() {
-  try { return JSON.parse(localStorage.getItem(saveKey())); }
-  catch { return null; }
+  try {
+    const s = JSON.parse(localStorage.getItem(saveKey()));
+    return s && s.fmt === SAVE_FMT ? s : null;
+  } catch { return null; }
+}
+
+/* ---------------- 页 ---------------- */
+
+function pageFor(sid) {
+  return document.querySelector(`#log .page[data-scene="${sid}"]`);
+}
+
+function createPage(sid) {
+  const sc = CH.scenes[sid];
+  const sec = document.createElement('section');
+  sec.className = 'page';
+  sec.dataset.scene = sid;
+  if (sc.props.label) {
+    const h = document.createElement('h2');
+    h.className = 'page-title';
+    h.textContent = sc.props.label;
+    sec.appendChild(h);
+  }
+  $('log').appendChild(sec);
+  return sec;
+}
+
+function showPage(sid) {
+  viewScene = sid;
+  document.querySelectorAll('#log .page')
+    .forEach(p => p.classList.toggle('cur', p.dataset.scene === sid));
+  const sc = CH.scenes[sid];
+  /* 页的氛围跟随视图：背景 / 环境音 / 效果层 / 记忆态 */
+  if (sc.props.bg) document.body.style.backgroundColor = sc.props.bg;
+  if (sc.props.amb) FX.amb(sc.props.amb);
+  if (sc.props.fx) runFx(sc.props.fx === 'off' ? 'fxoff' : sc.props.fx);
+  document.body.classList.toggle('memory', sc.props.mode === 'memory');
+  updatePagebar();
+  const pg = pageFor(sid);
+  if (sid === STATE.scene) {
+    (pg.lastElementChild || pg).scrollIntoView({ behavior: 'smooth', block: 'end' });
+  } else {
+    pg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function markSeen(sid, wordId) {
+  (STATE.seen[sid] = STATE.seen[sid] || []).includes(wordId) ||
+    STATE.seen[sid].push(wordId);
+}
+
+/* 该页是否还有从未点过的可互动元素 */
+function hasUnseen(sid) {
+  const pg = pageFor(sid), sc = CH.scenes[sid];
+  if (!pg || !sc) return false;
+  const seen = STATE.seen[sid] || [];
+  return [...pg.querySelectorAll('.w[data-act]')].some(el => {
+    if (el.classList.contains('used')) return false;
+    const id = el.dataset.act;
+    if (seen.includes(id)) return false;
+    return sc.blocks[id] || Object.keys(sc.blocks).some(k => k.startsWith(id + '@'));
+  });
+}
+
+function updatePagebar() {
+  const bar = $('pagebar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  STATE.pages.forEach((sid, i) => {
+    const b = document.createElement('span');
+    b.className = 'pg'
+      + (sid === viewScene ? ' cur' : '')
+      + (hasUnseen(sid) ? ' unseen' : '');
+    b.textContent = i + 1;
+    b.title = CH.scenes[sid].props.label || sid;
+    b.onclick = () => {
+      if (Q.length) { hint('（文字还在播放中……）', true); return; }
+      showPage(sid);
+    };
+    bar.appendChild(b);
+  });
 }
 
 /* ---------------- 文本输出 ---------------- */
@@ -157,7 +246,9 @@ function fmt(s) {
     (_, w, id) => `<span class="w" data-act="${id || w}">${w}</span>`);
 }
 
-function sayLine(t, extraCls) {
+function sayLine(t, extraCls, sid) {
+  const target = pageFor(sid || curScene || STATE.scene);
+  if (!target) return { textContent: '' };
   const p = document.createElement('p');
   let cls = extraCls || '', m;
   if (t.startsWith(': ')) t = t.slice(2); // 块内文本行的可选前缀
@@ -171,23 +262,21 @@ function sayLine(t, extraCls) {
     }
     if (!p.innerHTML) t = fmt(t);
   }
-  if (STATE.mode === 'memory') cls += ' mem';
+  const sc = CH.scenes[target.dataset.scene];
+  if (sc && sc.props.mode === 'memory') cls += ' mem';
   p.className = cls.trim();
   if (!p.innerHTML) p.innerHTML = fmt(t);
-  $('log').appendChild(p);
-  p.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  target.appendChild(p);
+  if (target.classList.contains('cur')) {
+    p.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
   return p;
 }
 
-function divider(t) { sayLine(t, 'divider'); }
-
-/* ---------------- 文本节奏：事件队列 + 点击继续 ----------------
- * 所有文本与动作先进队列，pump() 每次只消费约半屏的字数预算；
- * 队列未空时显示 ▼，点击页面任意处（或空格/回车）继续。
- */
+/* ---------------- 文本节奏：事件队列 + 点击继续 ---------------- */
 
 const CHUNK_CHARS = 72;  // 每次推进的字数预算
-const Q = [];            // 事件：{line, word, cls} | {div}
+const Q = [];            // 事件：{line, word, scene, cls}
 
 function qClear() { Q.length = 0; }
 
@@ -195,26 +284,25 @@ function updateMore() {
   $('more').style.display = Q.length ? 'block' : 'none';
 }
 
+let currentWord = null;  // off 不带参数时置灰的目标
+
 function pump() {
   let budget = CHUNK_CHARS;
   while (true) {
     if (!Q.length && !checkWhens()) break;
     if (!Q.length) continue;
     const ev = Q.shift();
-    let said = 0;
-    if (ev.div !== undefined) {
-      divider(ev.div);
-      said = 4;
-    } else {
-      currentWord = ev.word || null;
-      const r = execAction(ev.line, ev.cls);
-      currentWord = null;
-      if (typeof r === 'number') said = r;
-    }
-    budget -= said;
+    currentWord = ev.word || null;
+    curScene = ev.scene || STATE.scene;
+    const r = execAction(ev.line, ev.cls);
+    if (r === 'goto' && ev.word) offWord(ev.word, ev.scene); // 出口词用毕置灰
+    currentWord = null;
+    if (typeof r === 'number') budget -= r;
     if (budget <= 0 && Q.length) break;
   }
+  curScene = null;
   updateMore();
+  updatePagebar();
 }
 
 /* ---------------- 道具 / 线索 / 卷宗 ---------------- */
@@ -303,7 +391,7 @@ function execAction(t, cls) {
   if ((m = t.match(/^sfx\s+(\w+)/)))       { FX.sfx(m[1]); return; }
   if ((m = t.match(/^amb\s+(\w+)/)))       { FX.amb(m[1]); return; }
   if ((m = t.match(/^fx\s+(\w+)\s*(.*)/))) { runFx(m[1], m[2]); return; }
-  if ((m = t.match(/^off\s*(\w*)/)))       { offWord(m[1]); return; }
+  if ((m = t.match(/^off\s*(\w*)/)))       { offWord(m[1] || currentWord, curScene); return; }
   if ((m = t.match(/^archive\s+(.+)/))) {
     const [title, body = ''] = m[1].split('|').map(s => s.trim());
     STATE.archive.push({ title, body });
@@ -314,84 +402,84 @@ function execAction(t, cls) {
   return sayLine(t, cls).textContent.length;
 }
 
-let currentWord = null; // off 不带参数时置灰的目标
-
-function offWord(id) {
-  const target = id || currentWord;
-  if (!target) return;
-  document.querySelectorAll(`.w[data-act="${target}"]`)
+function offWord(id, sid) {
+  if (!id) return;
+  const scope = (sid && pageFor(sid)) || document;
+  scope.querySelectorAll(`.w[data-act="${id}"]`)
     .forEach(el => el.classList.add('used'));
 }
 
-function execBlock(block) {
-  if (block.once) offWord(block.word); // 立即置灰，防止文本放映期间重复触发
-  for (const a of block.actions) Q.push({ line: a, word: block.word });
+function execBlock(block, sid) {
+  if (block.once) offWord(block.word, sid); // 立即置灰，防止文本放映期间重复触发
+  for (const a of block.actions) Q.push({ line: a, word: block.word, scene: sid });
   pump();
 }
 
-/* 检查场景级自动触发；命中则把动作入队，返回 true */
+/* 检查已解锁各页的自动触发；命中则把动作入队（写入其所属页），返回 true */
 function checkWhens() {
-  const sc = CH.scenes[STATE.scene];
-  if (!sc) return false;
-  for (const w of sc.whens) {
-    if (!w.fired && evalCond(w.cond)) {
-      w.fired = true;
-      Q.push({ line: w.action, word: null });
-      return true;
+  for (const sid of STATE.pages) {
+    const sc = CH.scenes[sid];
+    for (const w of sc.whens) {
+      if (!w.fired && evalCond(w.cond)) {
+        w.fired = true;
+        Q.push({ line: w.action, word: null, scene: sid });
+        return true;
+      }
     }
   }
   return false;
 }
 
-/* ---------------- 场景 ---------------- */
+/* ---------------- 场景（页）---------------- */
 
 function enterScene(id) {
   const sc = CH.scenes[id];
   if (!sc) { console.error('场景不存在：' + id); return; }
   qClear();
-  /* 上个场景的互动词随场景切换全部失效（存档以场景为粒度） */
-  document.querySelectorAll('#log .w').forEach(el => el.classList.add('used'));
+  if (pageFor(id)) { showPage(id); return; } // 已解锁的页：仅跳转视图
+
+  createPage(id);
+  STATE.pages.push(id);
   STATE.scene = id;
-  STATE.mode = sc.props.mode || '';
-  document.body.classList.toggle('memory', STATE.mode === 'memory');
-  if (sc.props.bg) document.body.style.backgroundColor = sc.props.bg;
-  if (sc.props.amb) FX.amb(sc.props.amb);
-  if (sc.props.fx) runFx(sc.props.fx === 'off' ? 'fxoff' : sc.props.fx);
   sc.whens.forEach(w => w.fired = false);
   saveGame();
 
-  if (sc.props.label) Q.push({ div: sc.props.label });
   const coda = sc.props.style === 'coda' ? 'coda' : '';
-  for (const line of sc.flow) Q.push({ line, word: null, cls: coda });
+  for (const line of sc.flow) Q.push({ line, word: null, scene: id, cls: coda });
+  showPage(id);
 }
 
 /* ---------------- 点击分发 ---------------- */
 
 document.addEventListener('click', e => {
-  /* 文本未放完：底部道具栏/页眉/卷宗照常工作，其余点击一律视为「继续」 */
+  /* 文本未放完：底部道具栏/页眉/页码条/卷宗照常工作，其余点击一律视为「继续」 */
   if (Q.length) {
-    if (e.target.closest('footer, header, #hud, #archive, #cover')) return;
+    if (e.target.closest('footer, header, #hud, #pagebar, #archive, #cover')) return;
     pump();
     return;
   }
   const el = e.target.closest('.w[data-act]');
   if (!el || el.classList.contains('used')) return;
-  const sc = CH.scenes[STATE.scene];
+  const pageEl = el.closest('.page');
+  const sid = pageEl ? pageEl.dataset.scene : STATE.scene;
+  const sc = CH && CH.scenes[sid];
   if (!sc) return;
   const id = el.dataset.act;
+  markSeen(sid, id);
   if (selected) {
     const block = sc.blocks[id + '@' + selected];
-    if (block) { const item = selected; select(null); execBlock(block); }
+    if (block) { select(null); execBlock(block, sid); }
     else {
       el.classList.remove('shake'); void el.offsetWidth;
       el.classList.add('shake');
       hint('（' + CH.items[selected].name + '对它没有反应。）', true);
     }
   } else if (sc.blocks[id]) {
-    execBlock(sc.blocks[id]);
+    execBlock(sc.blocks[id], sid);
   } else if (Object.keys(sc.blocks).some(k => k.startsWith(id + '@'))) {
     hint('（直接点没有用，似乎需要装填什么。）', true);
   }
+  updatePagebar();
 });
 
 /* 键盘推进：空格 / 回车 */
@@ -427,9 +515,9 @@ function flash(strength = 1) {
   }));
 }
 
-/* 文字溃散：取最近的正文字符抛散整屏 */
+/* 文字溃散：取当前页最近的正文字符抛散整屏 */
 function fxDissolve() {
-  const text = [...document.querySelectorAll('#log p')].slice(-4)
+  const text = [...document.querySelectorAll('#log .page.cur p')].slice(-4)
     .map(p => p.textContent).join('').replace(/\s/g, '');
   const ov = document.createElement('div');
   ov.className = 'dissolve-ov';
@@ -637,6 +725,44 @@ const RAINFX = (() => {
 
 /* ---------------- 启动 ---------------- */
 
+/* 读档重建：按解锁顺序重放各页的场景正文（不重放互动展开），恢复状态 */
+function restoreGame(save) {
+  STATE.flags = new Set(save.flags);
+  STATE.items = save.items;
+  STATE.clues = save.clues || [];
+  STATE.archive = save.archive || [];
+  STATE.seen = save.seen || {};
+  STATE.pages = [];
+  renderItems();
+
+  for (const sid of save.pages) {
+    const sc = CH.scenes[sid];
+    if (!sc) continue;
+    createPage(sid);
+    STATE.pages.push(sid);
+    curScene = sid;
+    const coda = sc.props.style === 'coda' ? 'coda' : '';
+    for (const line of sc.flow) sayLine(line, coda, sid);
+    curScene = null;
+    /* 已点过的一次性词与出口词恢复置灰 */
+    const seen = STATE.seen[sid] || [];
+    for (const el of pageFor(sid).querySelectorAll('.w[data-act]')) {
+      const b = sc.blocks[el.dataset.act];
+      if (b && seen.includes(el.dataset.act) &&
+          (b.once || b.actions.some(a => /^goto\s/.test(a) || /^if .+:\s*goto\s/.test(a)))) {
+        el.classList.add('used');
+      }
+    }
+    /* 非前沿页的触发器视为已触发（其揭示文本不重放） */
+    if (sid !== save.scene) {
+      sc.whens.forEach(w => { if (evalCond(w.cond)) w.fired = true; });
+    }
+  }
+  STATE.scene = save.scene;
+  showPage(save.scene);
+  pump(); // 前沿页的 when 会重新揭示出口
+}
+
 function bootGame(chapterId, opts = {}) {
   IS_DRAFT = !!opts.draft;
   const src = opts.src || (window.MB_SCRIPTS || {})[chapterId];
@@ -654,14 +780,8 @@ function bootGame(chapterId, opts = {}) {
     w.innerHTML = `<span class="w" id="go-continue">同步记忆</span>（槽位 ${CH.meta.badge} · 继续）`;
     $('go-continue').onclick = () => {
       FX.unlockAudio();
-      STATE.flags = new Set(save.flags);
-      STATE.items = save.items;
-      STATE.clues = save.clues || [];
-      STATE.archive = save.archive || [];
-      renderItems();
       $('cover').classList.add('hide');
-      enterScene(save.scene);
-      pump();
+      restoreGame(save);
     };
   }
   $('go-start').onclick = () => {

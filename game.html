@@ -68,6 +68,33 @@
   }
   #btn-archive:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* —— 页码条 —— */
+  #pagebar {
+    position: sticky; top: 78px; z-index: 5;
+    max-width: 620px; margin: 0 auto;
+    padding: 8px 24px 10px;
+    background: var(--bg);
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }
+  .pg {
+    min-width: 26px; height: 26px; line-height: 24px;
+    text-align: center;
+    border: 1px solid #3a3f50; border-radius: 6px;
+    font-size: 13px; color: var(--dim);
+    cursor: pointer; user-select: none;
+    position: relative;
+    transition: all .15s;
+  }
+  .pg:hover { border-color: var(--accent); color: var(--accent); }
+  .pg.cur { border-color: var(--accent); color: var(--accent); }
+  .pg.unseen::after {
+    content: '';
+    position: absolute; top: -3px; right: -3px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
   main {
     max-width: 620px;
     margin: 0 auto;
@@ -75,6 +102,15 @@
     position: relative; z-index: 1;
   }
   main p { margin: 0 0 1.05em; animation: rise .5s ease both; }
+
+  /* —— 页 —— */
+  .page { display: none; }
+  .page.cur { display: block; animation: rise .4s ease both; }
+  .page-title {
+    text-align: center; color: var(--dim);
+    letter-spacing: .4em; margin: 1.2em 0 1.6em;
+    font-size: 15px; font-weight: normal;
+  }
   @keyframes rise {
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: none; }
@@ -300,6 +336,8 @@
   <span id="savetag"></span>
   <span id="btn-archive">卷宗</span>
 </div>
+
+<div id="pagebar"></div>
 
 <main id="log"></main>
 
