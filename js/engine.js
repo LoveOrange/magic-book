@@ -278,7 +278,8 @@ function updatePagebar() {
         + (a === viewAct ? ' cur' : '')
         + (PAGES.some(p => p.act === a && pageUnseen(p)) ? ' unseen' : '');
       tab.textContent = CH.acts[a] || ('第 ' + (a + 1) + ' 幕');
-      tab.onclick = () => {
+      tab.onclick = e => {
+        e.stopPropagation(); // 重建页码条会拆掉本按钮，阻止冒泡防误判为空白点击
         for (let j = PAGES.length - 1; j >= 0; j--) {
           if (PAGES[j].act === a) { showPage(j); break; }
         }
@@ -299,7 +300,7 @@ function updatePagebar() {
       + (pageUnseen(p) ? ' unseen' : '');
     b.textContent = no;
     b.title = CH.scenes[p.scene].props.label || p.scene;
-    b.onclick = () => showPage(j);
+    b.onclick = e => { e.stopPropagation(); showPage(j); };
     pgrow.appendChild(b);
   });
 }
@@ -487,7 +488,7 @@ function renderItems() {
     chip.dataset.item = id;
     chip.title = it.desc;
     chip.textContent = it.icon + ' ' + it.name;
-    chip.onclick = () => select(selected === id ? null : id);
+    chip.onclick = e => { e.stopPropagation(); select(selected === id ? null : id); };
     inv.appendChild(chip);
   }
 }
@@ -619,6 +620,8 @@ function enterScene(id) {
 /* ---------------- 点击分发 ---------------- */
 
 document.addEventListener('click', e => {
+  /* 目标已被前序 handler 重建拆离 DOM：closest 会失真，直接忽略 */
+  if (!e.target.isConnected) return;
   /* 1. 书签 */
   const bk = e.target.closest('.bk');
   if (bk) {
