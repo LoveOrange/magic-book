@@ -401,14 +401,10 @@ let sayDelay = 0;        // 同批段落的级联入场延迟
 function updateMore() {
   const more = $('more');
   if (!more || !CH) return;
-  let txt = '';
-  if (viewIdx >= 0 && viewIdx < PAGES.length - 1) txt = '▼';
-  else {
-    const sc = CH.scenes[STATE.scene];
-    if (sc && STATE.sp + 1 < sc.pages.length) txt = '下一页 ▼';
-  }
-  more.textContent = txt || '▼';
-  more.style.display = txt ? 'block' : 'none';
+  const sc = CH.scenes[STATE.scene];
+  const can = (viewIdx >= 0 && viewIdx < PAGES.length - 1) ||
+              (sc && STATE.sp + 1 < sc.pages.length);
+  more.style.display = can ? 'block' : 'none';
 }
 
 /* 顺序执行一组动作行（同步、一次性全显）；遇 goto 中止并透传 */
@@ -493,7 +489,8 @@ function renderItems() {
 function select(id) {
   selected = id;
   renderItems();
-  hint(id ? '已装填：' + CH.items[id].name + ' —— 点击文中的目标使用，再点一次退弹' : '');
+  const it = id && CH.items[id];
+  hint(it ? '已装填：' + it.name + '——' + it.desc + '（点击文中的目标使用，再点一次退弹）' : '');
 }
 
 function addClue(text) {
@@ -605,6 +602,7 @@ function enterScene(id) {
   STATE.sp = 0;
   const idx = newPage(id, 0);
   showPage(idx);
+  if (idx === 0) hint('点击发亮的词语互动；点击底部的 ▼ 翻页。', true);
   if (runLines(sc.pages[0].lines, id, idx, null, pageCls(sc)) !== 'goto') {
     checkWhens();
     saveGame();
@@ -648,9 +646,8 @@ document.addEventListener('click', e => {
     updatePagebar();
     return;
   }
-  /* 3. 继续（翻页 / 解锁下一页） */
-  if (e.target.closest('footer, header, #hud, #pagebar, #archive, #finder, #cover')) return;
-  if (CH) advance();
+  /* 3. 翻页：只响应底部的 ▼（不再响应空白处点击，杜绝误触跳页） */
+  if (e.target.closest('#more') && CH) advance();
 });
 
 /* 键盘推进：空格 / 回车 = 翻页 */

@@ -247,19 +247,18 @@
   }
   .stamp.fade { opacity: 0; }
 
-  /* —— 继续指示符 —— */
+  /* —— 翻页符：静止、半透明，不抢戏；它是唯一的翻页入口 —— */
   #more {
     display: none;
-    position: fixed; left: 50%; bottom: 96px; z-index: 4;
-    color: var(--accent); font-size: 14px;
+    position: fixed; left: 50%; bottom: 88px; z-index: 4;
+    transform: translateX(-50%);
+    color: var(--accent); opacity: .4;
+    font-size: 15px;
+    padding: 6px 22px; /* 加大点击热区 */
     cursor: pointer; user-select: none;
-    animation: bob 1.1s ease-in-out infinite;
-    text-shadow: 0 0 8px rgba(232,179,75,.5);
+    transition: opacity .25s;
   }
-  @keyframes bob {
-    0%, 100% { transform: translate(-50%, 0); }
-    50%      { transform: translate(-50%, 6px); }
-  }
+  #more:hover { opacity: .95; }
 
   /* —— 底部：提示条 + 弹仓/道具 —— */
   footer {
