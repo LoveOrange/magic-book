@@ -35,6 +35,7 @@ for (const [chId, src] of Object.entries(window.MB_SCRIPTS)) {
       }
       const g = a.match(/^get\s+(\w+)/);
       if (g && !ch.items[g[1]]) errs.push(`${sid}: get 未定义道具 ${g[1]}`);
+      if (/^(when|@scene|\+)\s/.test(a)) errs.push(`${sid}: 结构行被吞进块内（检查缩进）→ ${a}`);
     }
     const texts = sc.flow.concat(actions);
     for (const t of texts) {

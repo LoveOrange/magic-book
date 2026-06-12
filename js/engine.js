@@ -10,7 +10,7 @@ const SCENE_PROPS = ['label', 'bg', 'amb', 'music', 'fx', 'mode', 'style'];
 
 function parseScript(src) {
   const ch = { meta: {}, items: {}, scenes: {}, order: [] };
-  let mode = null, scene = null, block = null;
+  let mode = null, scene = null, block = null, blockIndent = 0;
 
   for (const raw of src.split('\n')) {
     const line = raw.replace(/\s+$/, '');
@@ -49,10 +49,12 @@ function parseScript(src) {
     /* 反应块头：+ id: ／ + id (once): ／ + id @ item: */
     if ((m = t.match(/^\+\s*(\w+)(?:\s*@\s*(\w+))?\s*(\(once\))?\s*:$/))) {
       block = { word: m[1], item: m[2] || null, once: !!m[3], actions: [] };
+      blockIndent = indent;
       scene.blocks[m[1] + (m[2] ? '@' + m[2] : '')] = block;
       continue;
     }
-    if (indent >= 2 && block) { block.actions.push(t); continue; }
+    /* 块内动作：必须比块头缩进更深，否则视为块已结束 */
+    if (block && indent > blockIndent) { block.actions.push(t); continue; }
     block = null;
 
     if ((m = t.match(/^when\s+(.+?)\s*:\s*(.+)$/))) {
