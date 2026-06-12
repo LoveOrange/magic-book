@@ -3,11 +3,16 @@
  *  章节文本注册在 window.MB_SCRIPTS，由 game.html 选择加载。
  *
  *  展现模型（作者控制节奏）：
- *  - 幕（@act）＞场景（@scene）＞页（@page）：页由剧本作者手动划分，
- *    是叙事节拍单位；@page 可设门槛（need 条件 | 提示），不满足时
- *    给出逆转裁判式的「还差点什么」提示，不放行。
- *  - 文本播放中任何点击都是「继续」；播放完毕后，点高亮词在本页就地
- *    展开内容，点空白处翻下一页。旧页随时回翻且保持可互动。
+ *  - 幕（@act）＞场景（@scene）＞页（@page）＞语句：页封装一系列语句，
+ *    由剧本作者手动划分，是叙事节拍单位；@page 可设门槛（need 条件 | 提示）。
+ *  - 开页即全显；点高亮词在本页就地展开内容，点阅读区空白翻页。
+ *
+ *  分层约定（防止组件逻辑逃逸出引擎）：
+ *  - 流程层：advance / enterScene / nextPage / execBlock 是仅有的推进入口。
+ *  - 事件层：全站只有一个点击分发器（见「点击分发」节）。任何可点组件
+ *    必须声明 data-ui 身份并在 UI_ACTIONS 注册，禁止自挂 onclick；
+ *    「翻页」只对阅读区 main 内的空白点击生效——页码条、幕标签、
+ *    弹仓等组件天然在翻页范围之外，无需排除名单。
  * ==================================================================== */
 'use strict';
 
@@ -205,6 +210,7 @@ function newPage(sid, sp) {
   sec.dataset.act = sc.act;
   const bk = document.createElement('span');
   bk.className = 'bk';
+  bk.dataset.ui = 'bk';
   bk.textContent = '🔖';
   bk.title = '书签';
   sec.appendChild(bk);
@@ -278,12 +284,8 @@ function updatePagebar() {
         + (a === viewAct ? ' cur' : '')
         + (PAGES.some(p => p.act === a && pageUnseen(p)) ? ' unseen' : '');
       tab.textContent = CH.acts[a] || ('第 ' + (a + 1) + ' 幕');
-      tab.onclick = e => {
-        e.stopPropagation(); // 重建页码条会拆掉本按钮，阻止冒泡防误判为空白点击
-        for (let j = PAGES.length - 1; j >= 0; j--) {
-          if (PAGES[j].act === a) { showPage(j); break; }
-        }
-      };
+      tab.dataset.ui = 'act';
+      tab.dataset.act = a;
       actrow.appendChild(tab);
     }
   }
@@ -300,7 +302,8 @@ function updatePagebar() {
       + (pageUnseen(p) ? ' unseen' : '');
     b.textContent = no;
     b.title = CH.scenes[p.scene].props.label || p.scene;
-    b.onclick = e => { e.stopPropagation(); showPage(j); };
+    b.dataset.ui = 'pg';
+    b.dataset.idx = j;
     pgrow.appendChild(b);
   });
 }
@@ -339,8 +342,9 @@ function renderFinder(kw) {
   const mk = (idx, excerpt) => {
     const d = document.createElement('div');
     d.className = 'fd-item';
+    d.dataset.ui = 'fd-item';
+    d.dataset.idx = idx;
     d.innerHTML = `<span class="fd-loc">${pageLabel(idx)}</span>${excerpt}`;
-    d.onclick = () => { $('finder').style.display = 'none'; showPage(idx); };
     box.appendChild(d);
   };
   if (kw) {
@@ -488,7 +492,7 @@ function renderItems() {
     chip.dataset.item = id;
     chip.title = it.desc;
     chip.textContent = it.icon + ' ' + it.name;
-    chip.onclick = e => { e.stopPropagation(); select(selected === id ? null : id); };
+    chip.dataset.ui = 'chip';
     inv.appendChild(chip);
   }
 }
@@ -617,47 +621,74 @@ function enterScene(id) {
   }
 }
 
-/* ---------------- 点击分发 ---------------- */
+/* ---------------- 点击分发（全站唯一的点击监听器） ----------------
+ * 组件以 data-ui 声明身份并在 UI_ACTIONS 注册；阅读区互动词其次；
+ * 「翻页」只对阅读区 main 内的空白点击生效。
+ */
+
+function jumpToAct(a) {
+  for (let j = PAGES.length - 1; j >= 0; j--) {
+    if (PAGES[j].act === a) { showPage(j); break; }
+  }
+}
+
+const UI_ACTIONS = {
+  start()          { startNewGame(); },
+  continue()       { continueGame(); },
+  mute()           { FX.toggle(); syncMute(); },
+  archive()        { openArchive(); },
+  'archive-close'() { $('archive').style.display = 'none'; },
+  finder()         { openFinder(); },
+  'finder-close'() { $('finder').style.display = 'none'; },
+  pg(el)           { showPage(+el.dataset.idx); },
+  act(el)          { jumpToAct(+el.dataset.act); },
+  chip(el)         { const id = el.dataset.item; select(selected === id ? null : id); },
+  'fd-item'(el)    { $('finder').style.display = 'none'; showPage(+el.dataset.idx); },
+  bk(el) {
+    const idx = PAGES.findIndex(p => p.el === el.closest('.page'));
+    if (idx >= 0) toggleBookmark(idx);
+  },
+};
+
+function wordClick(el) {
+  const pageEl = el.closest('.page');
+  const pageIdx = pageEl ? PAGES.findIndex(p => p.el === pageEl) : PAGES.length - 1;
+  const sid = pageEl ? pageEl.dataset.scene : STATE.scene;
+  const sc = CH.scenes[sid];
+  if (!sc) return;
+  const id = el.dataset.act;
+  markSeen(sid, id);
+  if (selected) {
+    const block = sc.blocks[id + '@' + selected];
+    if (block) { select(null); execBlock(block, sid, pageIdx); }
+    else {
+      el.classList.remove('shake'); void el.offsetWidth;
+      el.classList.add('shake');
+      hint('（' + CH.items[selected].name + '对它没有反应。）', true);
+    }
+  } else if (sc.blocks[id]) {
+    execBlock(sc.blocks[id], sid, pageIdx);
+  } else if (Object.keys(sc.blocks).some(k => k.startsWith(id + '@'))) {
+    hint('（直接点没有用，似乎需要装填什么。）', true);
+  }
+  updatePagebar();
+}
 
 document.addEventListener('click', e => {
-  /* 目标已被前序 handler 重建拆离 DOM：closest 会失真，直接忽略 */
-  if (!e.target.isConnected) return;
-  /* 1. 书签 */
-  const bk = e.target.closest('.bk');
-  if (bk) {
-    const idx = PAGES.findIndex(p => p.el === bk.closest('.page'));
-    if (idx >= 0) toggleBookmark(idx);
+  if (!e.target.isConnected) return; // 防御：目标已被重建拆离 DOM
+  /* 1. 注册组件 */
+  const ui = e.target.closest('[data-ui]');
+  if (ui) {
+    const fn = UI_ACTIONS[ui.dataset.ui];
+    if (fn) fn(ui);
     return;
   }
-  /* 2. 互动词：优先于翻页 */
-  const el = e.target.closest('.w[data-act]');
-  if (el && !el.classList.contains('used') && CH) {
-    const pageEl = el.closest('.page');
-    const pageIdx = pageEl ? PAGES.findIndex(p => p.el === pageEl) : PAGES.length - 1;
-    const sid = pageEl ? pageEl.dataset.scene : STATE.scene;
-    const sc = CH.scenes[sid];
-    if (!sc) return;
-    const id = el.dataset.act;
-    markSeen(sid, id);
-    if (selected) {
-      const block = sc.blocks[id + '@' + selected];
-      if (block) { select(null); execBlock(block, sid, pageIdx); }
-      else {
-        el.classList.remove('shake'); void el.offsetWidth;
-        el.classList.add('shake');
-        hint('（' + CH.items[selected].name + '对它没有反应。）', true);
-      }
-    } else if (sc.blocks[id]) {
-      execBlock(sc.blocks[id], sid, pageIdx);
-    } else if (Object.keys(sc.blocks).some(k => k.startsWith(id + '@'))) {
-      hint('（直接点没有用，似乎需要装填什么。）', true);
-    }
-    updatePagebar();
-    return;
-  }
-  /* 3. 翻页：点击空白处；UI 栏位（道具栏/页眉/页码条/弹窗）不触发 */
-  if (e.target.closest('footer, header, #hud, #pagebar, #archive, #finder, #cover')) return;
-  if (CH) advance();
+  if (!CH) return;
+  /* 2. 阅读区互动词 */
+  const el = e.target.closest('main .w[data-act]');
+  if (el && !el.classList.contains('used')) { wordClick(el); return; }
+  /* 3. 翻页：仅阅读区内的空白点击 */
+  if (e.target.closest('main')) advance();
 });
 
 /* 键盘推进：空格 / 回车 = 翻页 */
@@ -937,6 +968,34 @@ function restoreGame(save) {
   updateMore(); updatePagebar();
 }
 
+let pendingSave = null;
+
+function startNewGame() {
+  FX.unlockAudio();
+  localStorage.removeItem(saveKey());
+  $('cover').classList.add('hide');
+  enterScene(CH.meta.start || CH.order[0]);
+}
+
+function continueGame() {
+  if (!pendingSave) return;
+  FX.unlockAudio();
+  $('cover').classList.add('hide');
+  restoreGame(pendingSave);
+}
+
+function syncMute() {
+  document.querySelectorAll('.mutebtn')
+    .forEach(b => b.textContent = FX.isMuted() ? '🔇' : '🔊');
+}
+
+function openFinder() {
+  renderFinder('');
+  $('fd-q').value = '';
+  $('finder').style.display = 'flex';
+  $('fd-q').focus();
+}
+
 function bootGame(chapterId, opts = {}) {
   IS_DRAFT = !!opts.draft;
   const src = opts.src || (window.MB_SCRIPTS || {})[chapterId];
@@ -947,39 +1006,16 @@ function bootGame(chapterId, opts = {}) {
   $('hud-badge').textContent = CH.meta.badge ? '警号 ' + CH.meta.badge : '';
   $('cv-title').textContent = (CH.meta.title || '') + (IS_DRAFT ? ' · 草稿试玩' : '');
 
-  const save = loadSave();
-  if (save && CH.scenes[save.scene]) {
+  pendingSave = loadSave();
+  if (pendingSave && CH.scenes[pendingSave.scene]) {
     const w = $('cv-continue');
     w.style.display = '';
-    w.innerHTML = `<span class="w" id="go-continue">同步记忆</span>（槽位 ${CH.meta.badge} · 继续）`;
-    $('go-continue').onclick = () => {
-      FX.unlockAudio();
-      $('cover').classList.add('hide');
-      restoreGame(save);
-    };
+    w.innerHTML = `<span class="w" data-ui="continue">同步记忆</span>（槽位 ${CH.meta.badge} · 继续）`;
+  } else {
+    pendingSave = null;
   }
-  $('go-start').onclick = () => {
-    FX.unlockAudio();
-    localStorage.removeItem(saveKey());
-    $('cover').classList.add('hide');
-    enterScene(CH.meta.start || CH.order[0]);
-  };
-
-  const syncMute = () => document.querySelectorAll('.mutebtn')
-    .forEach(b => b.textContent = FX.isMuted() ? '🔇' : '🔊');
-  document.querySelectorAll('.mutebtn')
-    .forEach(b => b.onclick = () => { FX.toggle(); syncMute(); });
   syncMute();
 
-  $('btn-archive').onclick = openArchive;
-  $('arc-close').onclick = () => $('archive').style.display = 'none';
-  $('btn-finder').onclick = () => {
-    renderFinder('');
-    $('fd-q').value = '';
-    $('finder').style.display = 'flex';
-    $('fd-q').focus();
-  };
-  $('fd-close').onclick = () => $('finder').style.display = 'none';
   let fdTimer = null;
   $('fd-q').addEventListener('input', () => {
     clearTimeout(fdTimer);

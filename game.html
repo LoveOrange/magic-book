@@ -121,6 +121,8 @@
     margin: 0 auto;
     padding: 10px 24px 150px;
     position: relative; z-index: 1;
+    /* 撑满阅读视口：短页时下半屏空白也属于阅读区，点击可翻页 */
+    min-height: calc(100vh - 150px);
   }
   main p { margin: 0 0 1.05em; animation: rise .5s ease both; }
 
@@ -403,22 +405,22 @@
   <div class="sub">暂名 · 正式版竖切片 · 剧本格式 v0</div>
   <div class="lead">
     <span id="cv-title"></span><br>
-    <span class="w" id="go-start">载入初始记忆</span>（重新开始）
+    <span class="w" data-ui="start">载入初始记忆</span>（重新开始）
     <div id="cv-continue" style="display:none"></div>
   </div>
 </div>
 
 <header>记 忆 弹
   <a href="./">← 选剧本</a>
-  <span class="mutebtn" title="音效开关">🔊</span>
+  <span class="mutebtn" data-ui="mute" title="音效开关">🔊</span>
 </header>
 
 <div id="hud">
   <span id="hud-name"></span>
   <span id="hud-badge"></span>
   <span id="savetag"></span>
-  <span id="btn-finder" class="hudbtn">检索</span>
-  <span id="btn-archive" class="hudbtn">卷宗</span>
+  <span id="btn-finder" class="hudbtn" data-ui="finder">检索</span>
+  <span id="btn-archive" class="hudbtn" data-ui="archive">卷宗</span>
 </div>
 
 <div id="pagebar"><div id="actrow"></div><div id="pgrow"></div></div>
@@ -434,14 +436,14 @@
 
 <div id="archive">
   <div id="arc-panel">
-    <div id="arc-head">案 卷 库<span id="arc-close">✕ 关闭</span></div>
+    <div id="arc-head">案 卷 库<span id="arc-close" data-ui="archive-close">✕ 关闭</span></div>
     <div id="arc-list"></div>
   </div>
 </div>
 
 <div id="finder">
   <div id="fd-panel">
-    <div id="fd-head">检 索<span id="fd-close">✕ 关闭</span></div>
+    <div id="fd-head">检 索<span id="fd-close" data-ui="finder-close">✕ 关闭</span></div>
     <input id="fd-q" type="text" placeholder="搜索全文……（留空显示书签）">
     <div id="fd-res"></div>
   </div>
