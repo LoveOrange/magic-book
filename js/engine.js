@@ -123,7 +123,11 @@ function sayLine(t, extraCls) {
   if (t.startsWith('! ')) { cls += ' obj'; t = t.slice(2); }
   else if ((m = t.match(/^([一-龥A-Za-z0-9·]{1,10})(（内心）|\(内心\))?\s*[:：]\s*(.+)$/))) {
     if (m[2]) { cls += ' think'; t = m[3]; }
-    else { cls += ' speech'; t = `<b>${m[1]}</b>` + fmt(m[3]); p.innerHTML = t; }
+    else {
+      cls += ' speech';
+      if (m[1] === '系统') cls += ' sysv'; // 记忆侦查辅助系统的语音
+      t = `<b>${m[1]}</b>` + fmt(m[3]); p.innerHTML = t;
+    }
     if (!p.innerHTML) t = fmt(t);
   }
   if (STATE.mode === 'memory') cls += ' mem';
