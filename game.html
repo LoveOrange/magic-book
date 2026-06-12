@@ -247,18 +247,22 @@
   }
   .stamp.fade { opacity: 0; }
 
-  /* —— 翻页符：静止、半透明，不抢戏；它是唯一的翻页入口 —— */
+  /* —— 翻页状态灯：半透明小点，与背景融合。
+        呼吸闪烁=可翻页；静止暗点=有下一页但条件未满足 —— */
   #more {
     display: none;
-    position: fixed; left: 50%; bottom: 88px; z-index: 4;
+    position: fixed; left: 50%; bottom: 92px; z-index: 4;
     transform: translateX(-50%);
-    color: var(--accent); opacity: .4;
-    font-size: 15px;
-    padding: 6px 22px; /* 加大点击热区 */
-    cursor: pointer; user-select: none;
-    transition: opacity .25s;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ink);
+    opacity: .15;
+    pointer-events: none; /* 纯状态灯：点空白处即翻页 */
   }
-  #more:hover { opacity: .95; }
+  #more.ready { animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe {
+    0%, 100% { opacity: .1; }
+    50%      { opacity: .55; }
+  }
 
   /* —— 底部：提示条 + 弹仓/道具 —— */
   footer {
@@ -421,7 +425,7 @@
 
 <main id="log"></main>
 
-<div id="more">▼</div>
+<div id="more"></div>
 
 <footer>
   <div id="hintbar"></div>

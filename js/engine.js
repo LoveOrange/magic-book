@@ -401,10 +401,16 @@ let sayDelay = 0;        // 同批段落的级联入场延迟
 function updateMore() {
   const more = $('more');
   if (!more || !CH) return;
-  const sc = CH.scenes[STATE.scene];
-  const can = (viewIdx >= 0 && viewIdx < PAGES.length - 1) ||
-              (sc && STATE.sp + 1 < sc.pages.length);
-  more.style.display = can ? 'block' : 'none';
+  /* 三态状态灯：呼吸=可翻页；静止暗点=有下一页但条件未满足；隐藏=没有下一页 */
+  let state = 'hide';
+  if (viewIdx >= 0 && viewIdx < PAGES.length - 1) state = 'go';
+  else {
+    const sc = CH.scenes[STATE.scene];
+    const np = sc && sc.pages[STATE.sp + 1];
+    if (np) state = (!np.gate || evalCond(np.gate.cond)) ? 'go' : 'wait';
+  }
+  more.style.display = state === 'hide' ? 'none' : 'block';
+  more.classList.toggle('ready', state === 'go');
 }
 
 /* 顺序执行一组动作行（同步、一次性全显）；遇 goto 中止并透传 */
@@ -602,7 +608,7 @@ function enterScene(id) {
   STATE.sp = 0;
   const idx = newPage(id, 0);
   showPage(idx);
-  if (idx === 0) hint('点击发亮的词语互动；点击底部的 ▼ 翻页。', true);
+  if (idx === 0) hint('点击发亮的词语互动；点击空白处翻页。', true);
   if (runLines(sc.pages[0].lines, id, idx, null, pageCls(sc)) !== 'goto') {
     checkWhens();
     saveGame();
@@ -646,8 +652,9 @@ document.addEventListener('click', e => {
     updatePagebar();
     return;
   }
-  /* 3. 翻页：只响应底部的 ▼（不再响应空白处点击，杜绝误触跳页） */
-  if (e.target.closest('#more') && CH) advance();
+  /* 3. 翻页：点击空白处；UI 栏位（道具栏/页眉/页码条/弹窗）不触发 */
+  if (e.target.closest('footer, header, #hud, #pagebar, #archive, #finder, #cover')) return;
+  if (CH) advance();
 });
 
 /* 键盘推进：空格 / 回车 = 翻页 */
