@@ -364,12 +364,14 @@ const RAIN = (() => {
 /* 合成音效 */
 const FX = (() => {
   let ctx = null, master = null, rainGain = null, thunderTimer = null;
-  let muted = false, calmed = false;
+  let calmed = false;
+  let muted = localStorage.getItem('mb-muted') === '1'; // 与其他剧本共享
 
   function ensure() {
     if (!ctx) {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       master = ctx.createGain();
+      master.gain.value = muted ? 0 : 1;
       master.connect(ctx.destination);
     }
     if (ctx.state === 'suspended') ctx.resume();
@@ -466,15 +468,19 @@ const FX = (() => {
     },
     toggle() {
       muted = !muted;
+      localStorage.setItem('mb-muted', muted ? '1' : '0');
       if (master) master.gain.value = muted ? 0 : 1;
       return muted;
     },
+    isMuted() { return muted; },
   };
 })();
 
-document.getElementById('mute').onclick = e => {
-  e.target.textContent = FX.toggle() ? '🔇' : '🔊';
-};
+{
+  const $mute = document.getElementById('mute');
+  $mute.textContent = FX.isMuted() ? '🔇' : '🔊';
+  $mute.onclick = () => { $mute.textContent = FX.toggle() ? '🔇' : '🔊'; };
+}
 
 /* ====================================================================
  *  剧情部分（故事都写在下面，随便改）

@@ -73,6 +73,28 @@
     max-width: 620px;
     margin: 0 auto;
     padding: 8px 24px 150px;
+    position: relative; z-index: 1; /* 压在背景字海上方 */
+  }
+
+  /* —— 氛围：加班字海 / 闪光 / 静音按钮 —— */
+  #chars {
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none;
+  }
+  #flash {
+    position: fixed; inset: 0; z-index: 8;
+    pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at 50% -10%,
+      rgba(235, 240, 255, .9), rgba(235, 240, 255, .25) 55%, transparent 80%);
+  }
+  #mute {
+    position: absolute; right: 18px; top: 12px;
+    cursor: pointer; font-size: 15px; opacity: .75;
+    letter-spacing: 0;
+  }
+  #bmute {
+    position: absolute; left: 20px; top: 14px; z-index: 2;
+    cursor: pointer; font-size: 18px; opacity: .8;
   }
   main p { margin: 0 0 1.1em; animation: rise .5s ease both; }
   @keyframes rise {
@@ -165,7 +187,7 @@
   /* —— 标题页 —— */
   #cover {
     position: fixed; inset: 0; z-index: 10;
-    background: var(--bg);
+    background: rgba(20, 22, 29, .86); /* 半透明，透出背景字海 */
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     text-align: center; padding: 24px;
@@ -276,6 +298,9 @@
 </head>
 <body>
 
+<canvas id="chars"></canvas>
+<div id="flash"></div>
+
 <div id="cover">
   <h1>整顿职场</h1>
   <div class="sub">职场爽文 · 连击玩法 DEMO</div>
@@ -288,6 +313,7 @@
 
 <header>整 顿 职 场
   <a href="./">← 选剧本</a>
+  <span id="mute" class="mutebtn" title="音效开关">🔊</span>
 </header>
 
 <div id="hud">
@@ -309,6 +335,7 @@
 <div id="battle">
   <div class="top"><div class="vs">最 终 对 决</div></div>
   <div id="arena">
+    <span id="bmute" class="mutebtn" title="音效开关">🔊</span>
     <div id="bcombo">COMBO<b>0</b></div>
     <div id="ko">K.O.</div>
   </div>
@@ -377,6 +404,7 @@ function addItem(id) {
   chip.textContent = it.icon + ' ' + it.name;
   chip.onclick = () => select(selected === id ? null : id);
   $inv.appendChild(chip);
+  FX.get();
   say('【获得证据：' + it.name + '】', 'get');
 }
 
@@ -485,6 +513,7 @@ function startBattle() {
       b.classList.add('hit');
       setTimeout(() => b.remove(), 350);
       addCombo(1); syncCombo();
+      FX.hit(combo);
       damage(HIT_DMG);
       if (hp <= 0) finish(true);
     });
@@ -507,6 +536,7 @@ function startBattle() {
     clearInterval(spawner);
     if (ko) {
       addCombo(5); syncCombo();          // K.O. 奖励连击
+      FX.ko();
       document.getElementById('ko').style.display = 'flex';
     }
     setTimeout(showResult, ko ? 1400 : 600);
@@ -524,6 +554,7 @@ const RANKS = [
 
 function showResult() {
   const r = RANKS.find(r => combo >= r.min);
+  FX.fanfare(RANKS.indexOf(r));
   document.getElementById('grade').textContent = r.grade;
   document.getElementById('grade').style.color = r.color;
   document.getElementById('grade').style.textShadow = '0 0 40px ' + r.color + '88';
@@ -538,6 +569,184 @@ function showResult() {
   $battle.style.display = 'none';
   document.getElementById('result').style.display = 'flex';
 }
+
+/* ====================================================================
+ *  氛围部分：加班字海（canvas）+ 合成音效（Web Audio，无音频文件）
+ *  音效开关存在 localStorage('mb-muted')，两个剧本共享
+ * ================================================================== */
+
+function flash(strength = 1) {
+  const f = document.getElementById('flash');
+  f.style.transition = 'none';
+  f.style.opacity = strength;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      f.style.transition = 'opacity .6s';
+      f.style.opacity = 0;
+    }));
+}
+
+/* 背景字海：加班关键词缓缓下沉 */
+(() => {
+  const cv = document.getElementById('chars');
+  const cx = cv.getContext('2d');
+  const WORDS = ['加', '班', '周', '报', '需', '求', '改', '会', '催', '卷'];
+
+  function resize() { cv.width = innerWidth; cv.height = innerHeight; }
+  resize(); addEventListener('resize', resize);
+
+  function make(fromTop) {
+    return {
+      x: Math.random() * innerWidth,
+      y: fromTop ? -20 : Math.random() * innerHeight,
+      v: .35 + Math.random() * .7,
+      size: 11 + Math.random() * 6,
+      a: .04 + Math.random() * .06,
+      ch: WORDS[Math.floor(Math.random() * WORDS.length)],
+    };
+  }
+  const drops = Array.from({ length: Math.min(60, innerWidth / 12) }, () => make(false));
+
+  function step() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    cx.fillStyle = '#8a93ad';
+    for (let i = 0; i < drops.length; i++) {
+      const d = drops[i];
+      d.y += d.v;
+      if (d.y > cv.height + 20) drops[i] = make(true);
+      cx.globalAlpha = d.a;
+      cx.font = d.size + 'px serif';
+      cx.fillText(d.ch, d.x, d.y);
+    }
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+})();
+
+/* 合成音效 */
+const FX = (() => {
+  let ctx = null, master = null, nightGains = [], kbTimer = null, night = false;
+  let muted = localStorage.getItem('mb-muted') === '1';
+
+  function ensure() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = muted ? 0 : 1;
+      master.connect(ctx.destination);
+    }
+    if (ctx.state === 'suspended') ctx.resume();
+  }
+
+  function noiseBuffer(sec) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate * sec, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  function tone(type, freq, dur, vol, freqEnd) {
+    ensure();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    const t = ctx.currentTime;
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(.001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur);
+  }
+
+  function rustle(dur, freq, vol) {
+    ensure();
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(dur);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = freq;
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(.001, t + dur);
+    src.connect(hp); hp.connect(g); g.connect(master);
+    src.start();
+  }
+
+  /* 深夜办公室：空调低鸣 + 远处偶尔的键盘声 */
+  function startNight() {
+    night = true;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(3);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 220;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    src.connect(lp); lp.connect(g); g.connect(master);
+    src.start();
+    g.gain.linearRampToValueAtTime(.04, ctx.currentTime + 2);
+    const o = ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = 120;
+    const g2 = ctx.createGain();
+    g2.gain.value = .012;
+    o.connect(g2); g2.connect(master);
+    o.start();
+    nightGains = [g, g2];
+    keys();
+  }
+  function keys() {
+    if (!night) return;
+    kbTimer = setTimeout(() => {
+      const n = 3 + Math.floor(Math.random() * 6);
+      for (let i = 0; i < n; i++)
+        setTimeout(() => night && rustle(.03, 2500, .05), i * (90 + Math.random() * 120));
+      keys();
+    }, 1800 + Math.random() * 4200);
+  }
+
+  return {
+    start() { ensure(); startNight(); },
+    dayBreak() { /* 天亮了，深夜底噪淡出 */
+      night = false;
+      clearTimeout(kbTimer);
+      nightGains.forEach(g => g.gain.linearRampToValueAtTime(0, ctx.currentTime + 2));
+    },
+    slam()    { tone('sine', 70, .22, .6, 45); rustle(.1, 1200, .2); },     // 摔周报 / 拍桌
+    buzz()    { [0, 260].forEach(d => setTimeout(() => { tone('square', 55, .18, .18); tone('sine', 180, .18, .06); }, d)); },
+    shutter() { rustle(.04, 4000, .25); setTimeout(() => rustle(.03, 3000, .15), 70); },
+    print()   { for (let i = 0; i < 6; i++) setTimeout(() => rustle(.05, 1800, .12), i * 130); },
+    paper()   { rustle(.16, 3200, .1); },
+    get()     { tone('sine', 880, .12, .16); setTimeout(() => tone('sine', 1318, .25, .14), 110); },
+    objection() { tone('sawtooth', 520, .25, .22, 130); flash(.8); },
+    hit(c) {  /* 连击打击音：沿五声音阶步步走高 */
+      const scale = [0, 2, 4, 7, 9];
+      const step = scale[c % 5] + 12 * Math.floor((c % 15) / 5);
+      tone('square', 440 * Math.pow(2, step / 12), .09, .12);
+      rustle(.03, 3000, .12);
+    },
+    ko()      { tone('sine', 60, .8, .7, 38); rustle(.3, 400, .3); flash(1); },
+    fanfare(rank) { /* 0=SSS … 4=C，评级越高号声越长 */
+      const seqs = [[0, 4, 7, 12, 16], [0, 4, 7, 12], [0, 4, 7], [0, 5], [3, 0]];
+      seqs[rank].forEach((s, k) =>
+        setTimeout(() => tone('triangle', 523 * Math.pow(2, s / 12), .35, .2), k * 140));
+    },
+    toggle() {
+      muted = !muted;
+      localStorage.setItem('mb-muted', muted ? '1' : '0');
+      if (master) master.gain.value = muted ? 0 : 1;
+      return muted;
+    },
+    isMuted() { return muted; },
+  };
+})();
+
+function syncMute() {
+  const icon = FX.isMuted() ? '🔇' : '🔊';
+  document.querySelectorAll('.mutebtn').forEach(b => b.textContent = icon);
+}
+document.querySelectorAll('.mutebtn').forEach(b =>
+  b.onclick = () => { FX.toggle(); syncMute(); });
+syncMute();
 
 /* ====================================================================
  *  剧情部分
@@ -629,7 +838,7 @@ const ACTIONS = {
         say('你站了起来。整个会议室刷地安静。');
         say('「方案不行？王总，您昨晚发给陈总的那份『您的方案』，麻烦当众翻到任何一页——右下角的水印，是我的工号。」');
         say('投影幕布上，聊天记录一页一页翻过。有人开始倒吸冷气。');
-        damage(20); addCombo(5);
+        FX.objection(); damage(20); addCombo(5);
         say('「截、截图能说明什么！再说部门经费紧张，还不是因为有人[铺张浪费|t2]……」', 'testi');
       }
     }
@@ -643,7 +852,7 @@ const ACTIONS = {
         say('——哦？浪费？', 'obj');
         say('「君悦养生会所，八千八，审批人王建国。」你扬了扬手里的报销单。「走的是团建经费——可咱们组的团建，去年就停办了。大家说，是吗？」');
         say('全组齐刷刷地点头。陈总的眉毛挑了起来。');
-        damage(20); addCombo(5);
+        FX.objection(); damage(20); addCombo(5);
         say('「你！你这是恶意中伤！信不信我让你今天就[滚出|t3]这家公司！」', 'testi');
       }
     }
@@ -657,7 +866,7 @@ const ACTIONS = {
         say('——您是说，像这份名单一样吗？', 'obj');
         say('你把优化名单拍在桌上。「性价比低，建议优化。王总，全组十二个人，您一口气写了九个。」');
         say('「合着业绩是您的，锅是我们的，优化名单上全是干活的人。」');
-        damage(20); addCombo(5);
+        FX.objection(); damage(20); addCombo(5);
         say('王建国脸色惨白，手指着你，嘴唇哆嗦着还想狡辩——');
         think('机会来了！趁他破防，把憋了三年的话全部说出去！');
         say('[发起总攻|fight]', 'obj');
@@ -665,15 +874,25 @@ const ACTIONS = {
     }
   },
 
-  fight: { click() { off('fight'); startBattle(); } },
+  fight: { click() { off('fight'); FX.slam(); startBattle(); } },
 
   /* ---------- 结算 ---------- */
   retry: { click() { location.reload(); } },
   home:  { click() { location.href = './'; } },
 };
 
+/* —— 给互动动作统一挂上音效 —— */
+[['phone', 'buzz'], ['printer', 'print'], ['pickShot', 'shutter'],
+ ['bin', 'paper'], ['pickBill', 'paper'], ['pickList', 'paper'],
+ ['tomorrow', 'dayBreak']].forEach(([id, fx]) => {
+  const orig = ACTIONS[id].click;
+  if (orig) ACTIONS[id].click = () => { FX[fx](); orig(); };
+});
+
 /* —— 标题页 —— */
 document.getElementById('startword').onclick = () => {
+  FX.start(); // 浏览器要求音频由用户手势触发，封面点击正好解锁
+  FX.slam();  // 摔下周报
   document.getElementById('cover').classList.add('hide');
   scene1();
 };
