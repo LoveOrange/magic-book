@@ -72,6 +72,45 @@ function parseScript(src) {
   return ch;
 }
 
+/* 剧本静态检查（FORMAT.md §8 的部分实现）；返回问题列表，空数组为通过 */
+function lintChapter(ch) {
+  const errs = [];
+  if (!ch.scenes[ch.meta.start]) errs.push(`start 场景不存在: ${ch.meta.start}`);
+
+  const reachable = new Set([ch.meta.start]);
+  for (const [sid, sc] of Object.entries(ch.scenes)) {
+    const actions = Object.values(sc.blocks).flatMap(b => b.actions)
+      .concat(sc.whens.map(w => w.action));
+    for (const a of actions) {
+      const m = a.match(/goto\s+(\w+)/);
+      if (m) {
+        if (!ch.scenes[m[1]]) errs.push(`${sid}: goto 目标不存在 ${m[1]}`);
+        else reachable.add(m[1]);
+      }
+      const g = a.match(/^get\s+(\w+)/);
+      if (g && !ch.items[g[1]]) errs.push(`${sid}: get 未定义道具 ${g[1]}`);
+      if (/^(when|@scene|\+)\s/.test(a)) errs.push(`${sid}: 结构行被吞进块内（检查缩进）→ ${a}`);
+    }
+    const texts = sc.flow.concat(actions);
+    for (const t of texts) {
+      for (const m of t.matchAll(/\[([^\]|]+)(?:\|([^\]]+))?\]/g)) {
+        if (!m[2]) { errs.push(`${sid}: 互动词省略了 id（i18n 警告）[${m[1]}]`); continue; }
+        const id = m[2];
+        const has = sc.blocks[id] || Object.keys(sc.blocks).some(k => k.startsWith(id + '@'));
+        if (!has) errs.push(`${sid}: 互动词无对应块 [${m[1]}|${id}]`);
+      }
+    }
+    for (const k of Object.keys(sc.blocks)) {
+      const at = k.split('@')[1];
+      if (at && !ch.items[at]) errs.push(`${sid}: @块引用未定义道具 ${at}`);
+    }
+  }
+  for (const sid of Object.keys(ch.scenes)) {
+    if (!reachable.has(sid)) errs.push(`不可达场景: ${sid}`);
+  }
+  return errs;
+}
+
 /* ---------------- 运行时状态 ---------------- */
 
 let CH = null;
@@ -87,7 +126,9 @@ let selected = null;
 
 const $ = id => document.getElementById(id);
 
-function saveKey() { return 'mb-save-' + CH.meta.id; }
+let IS_DRAFT = false; // 草稿试玩：存档与正式进度隔离
+
+function saveKey() { return 'mb-save-' + (IS_DRAFT ? 'draft-' : '') + CH.meta.id; }
 
 function saveGame() {
   localStorage.setItem(saveKey(), JSON.stringify({
@@ -546,6 +587,7 @@ const FX = (() => {
 
 const RAINFX = (() => {
   const cv = $('rainfx');
+  if (!cv) return { start() {}, stop() {} }; // 无画布环境（剧本编辑器等）
   const cx = cv.getContext('2d');
   const CHARS = ['丶', '丨', '丿'];
   let raf = null, on = false, drops = [];
@@ -595,14 +637,15 @@ const RAINFX = (() => {
 
 /* ---------------- 启动 ---------------- */
 
-function bootGame(chapterId) {
-  const src = (window.MB_SCRIPTS || {})[chapterId];
+function bootGame(chapterId, opts = {}) {
+  IS_DRAFT = !!opts.draft;
+  const src = opts.src || (window.MB_SCRIPTS || {})[chapterId];
   if (!src) { document.body.textContent = '剧本未找到：' + chapterId; return; }
   CH = parseScript(src);
 
   $('hud-name').textContent = CH.meta.protagonist || '';
   $('hud-badge').textContent = CH.meta.badge ? '警号 ' + CH.meta.badge : '';
-  $('cv-title').textContent = CH.meta.title || '';
+  $('cv-title').textContent = (CH.meta.title || '') + (IS_DRAFT ? ' · 草稿试玩' : '');
 
   const save = loadSave();
   if (save && CH.scenes[save.scene]) {

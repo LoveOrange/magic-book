@@ -320,7 +320,14 @@
 <script src="scripts/case1.zh.js"></script>
 <script src="js/engine.js"></script>
 <script>
-  bootGame(new URLSearchParams(location.search).get('ch') || 'case1');
+  const params = new URLSearchParams(location.search);
+  if (params.get('draft') === '1') {
+    const draftSrc = localStorage.getItem('mb-draft-src');
+    if (draftSrc) bootGame('draft', { src: draftSrc, draft: true });
+    else document.body.textContent = '没有找到草稿。请先在剧本编辑器（editor.html）中编辑并保存。';
+  } else {
+    bootGame(params.get('ch') || 'case1');
+  }
 </script>
 </body>
 </html>
