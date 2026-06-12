@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>记忆弹（暂名）· 正式版竖切片</title>
+<style>
+  :root {
+    --bg: #14161d;
+    --paper: #1b1e28;
+    --ink: #cfd3dd;
+    --dim: #6b7080;
+    --accent: #e8b34b;
+    --accent-dim: #8a6d34;
+    --clue: #6fd3c7;
+    --get: #f0c969;
+    --obj: #e86a5e;
+    --mem: #9db8dd;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    transition: background-color 2s;
+    color: var(--ink);
+    font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
+    font-size: 18px;
+    line-height: 2;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: linear-gradient(var(--bg) 75%, transparent);
+    padding: 14px 20px 6px;
+    text-align: center;
+    letter-spacing: .35em;
+    color: var(--dim);
+    font-size: 14px;
+  }
+  header a {
+    position: absolute; left: 18px; top: 14px;
+    color: var(--dim); text-decoration: none; letter-spacing: .1em;
+  }
+  header .mutebtn {
+    position: absolute; right: 18px; top: 12px;
+    cursor: pointer; font-size: 15px; opacity: .75; letter-spacing: 0;
+  }
+
+  /* —— 常驻 HUD：姓名 / 警号 / 记忆槽 / 卷宗 —— */
+  #hud {
+    position: sticky; top: 44px; z-index: 5;
+    max-width: 620px; margin: 0 auto;
+    padding: 2px 24px 8px;
+    background: var(--bg);
+    border-bottom: 1px solid #232734;
+    display: flex; align-items: center; gap: 14px;
+    font-size: 13px; color: var(--dim);
+  }
+  #hud-badge { letter-spacing: .12em; }
+  #savetag { opacity: 0; transition: opacity .5s; color: var(--accent); }
+  #savetag.on { opacity: .9; }
+  #btn-archive {
+    margin-left: auto;
+    cursor: pointer;
+    border: 1px solid #3a3f50; border-radius: 14px;
+    padding: 1px 12px;
+    transition: all .15s;
+  }
+  #btn-archive:hover { border-color: var(--accent); color: var(--accent); }
+
+  main {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 10px 24px 150px;
+    position: relative; z-index: 1;
+  }
+  main p { margin: 0 0 1.05em; animation: rise .5s ease both; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  p.speech b {
+    color: #b9c2d8; font-weight: normal;
+    margin-right: .8em;
+  }
+  p.speech b::after { content: ''; }
+  p.think  { color: var(--dim); font-size: 16px; }
+  p.get    { color: var(--get); }
+  p.clue   { color: var(--clue); }
+  p.obj    {
+    color: var(--obj); font-weight: bold;
+    font-size: 21px; letter-spacing: .12em;
+  }
+  p.divider {
+    text-align: center; color: var(--dim);
+    letter-spacing: .4em; margin: 2em 0;
+    font-size: 15px;
+  }
+  p.coda { color: #98a0b5; line-height: 2.3; }
+
+  /* 记忆态：文字质感区别于现实 */
+  p.mem {
+    color: var(--mem);
+    text-shadow: 0 0 8px rgba(157, 184, 221, .25);
+  }
+  p.mem.speech b { color: #c4d6ef; }
+
+  .w {
+    color: var(--accent);
+    border-bottom: 1px dashed var(--accent);
+    padding: 0 1px;
+    cursor: pointer;
+    transition: text-shadow .2s, color .2s;
+  }
+  .w:hover { text-shadow: 0 0 10px rgba(232,179,75,.8); }
+  .w.used {
+    color: var(--accent-dim);
+    border-bottom-color: transparent;
+    cursor: default; text-shadow: none;
+  }
+  .w.shake { animation: shake .35s; display: inline-block; }
+  @keyframes shake {
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+  body.quake { animation: quake .3s; }
+  @keyframes quake {
+    25% { transform: translate(3px, -2px); }
+    50% { transform: translate(-3px, 2px); }
+    75% { transform: translate(2px, 1px); }
+  }
+
+  /* —— 背景效果层 / 闪光 —— */
+  #rainfx { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0; }
+  #flash {
+    position: fixed; inset: 0; z-index: 8;
+    pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at 50% -10%,
+      rgba(235, 240, 255, .9), rgba(235, 240, 255, .25) 55%, transparent 80%);
+  }
+
+  /* —— 文字溃散 —— */
+  .dissolve-ov {
+    position: fixed; inset: 0; z-index: 9; pointer-events: none;
+  }
+  .dissolve-ov span {
+    position: absolute;
+    color: #aebadb; font-size: 18px;
+    animation: dis 1.3s ease-in forwards;
+  }
+  @keyframes dis {
+    to {
+      transform: translate(var(--dx), var(--dy)) rotate(var(--rot));
+      opacity: 0;
+    }
+  }
+
+  /* —— 归档盖章 —— */
+  .stamp {
+    position: fixed; left: 50%; top: 42%; z-index: 9;
+    transform: translate(-50%, -50%) rotate(-8deg);
+    border: 3px solid #c0392b; border-radius: 6px;
+    color: #c0392b;
+    padding: 10px 22px;
+    font-size: 19px; letter-spacing: .18em; white-space: nowrap;
+    background: rgba(20, 22, 29, .6);
+    animation: stampIn .35s cubic-bezier(.2, 2.2, .4, 1) both;
+    pointer-events: none;
+    transition: opacity .8s;
+  }
+  @keyframes stampIn {
+    from { transform: translate(-50%, -50%) rotate(-8deg) scale(2.4); opacity: 0; }
+    to   { transform: translate(-50%, -50%) rotate(-8deg) scale(1); opacity: 1; }
+  }
+  .stamp.fade { opacity: 0; }
+
+  /* —— 底部：提示条 + 弹仓/道具 —— */
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    background: var(--paper);
+    border-top: 1px solid #2b2f3d;
+    padding: 8px 16px 14px;
+  }
+  #hintbar {
+    max-width: 620px; margin: 0 auto 6px;
+    font-size: 13px; color: var(--dim);
+    min-height: 20px; transition: color .2s;
+  }
+  #hintbar.flash { color: var(--accent); }
+  #inv {
+    max-width: 620px; margin: 0 auto;
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  }
+  #inv .label { font-size: 13px; color: var(--dim); letter-spacing: .2em; }
+  .chip {
+    border: 1px solid #3a3f50; border-radius: 20px;
+    padding: 3px 14px; font-size: 15px;
+    cursor: pointer; user-select: none;
+    background: #20242f;
+    transition: all .15s;
+    animation: rise .4s ease both;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.sel {
+    border-color: var(--accent); color: var(--accent);
+    box-shadow: 0 0 12px rgba(232,179,75,.35);
+  }
+
+  /* —— 卷宗库 —— */
+  #archive {
+    display: none;
+    position: fixed; inset: 0; z-index: 10;
+    background: rgba(10, 11, 16, .85);
+    align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  #arc-panel {
+    background: var(--paper);
+    border: 1px solid #3a3f50; border-radius: 10px;
+    width: min(560px, 100%); max-height: 72vh;
+    display: flex; flex-direction: column;
+  }
+  #arc-head {
+    padding: 14px 20px;
+    border-bottom: 1px solid #2b2f3d;
+    letter-spacing: .3em; color: var(--dim); font-size: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #arc-close { cursor: pointer; letter-spacing: 0; color: var(--dim); }
+  #arc-close:hover { color: var(--accent); }
+  #arc-list { padding: 8px 20px 18px; overflow-y: auto; }
+  .arc-entry { border-bottom: 1px dashed #2b2f3d; padding: 12px 0; }
+  .arc-title { color: var(--accent); font-size: 16px; margin-bottom: 4px; }
+  .arc-body  { color: var(--dim); font-size: 14px; line-height: 1.9; }
+  .arc-empty { color: var(--dim); text-align: center; padding: 30px 0; }
+
+  /* —— 封面 —— */
+  #cover {
+    position: fixed; inset: 0; z-index: 11;
+    background: rgba(16, 18, 25, .92);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+    transition: opacity .8s;
+  }
+  #cover.hide { opacity: 0; pointer-events: none; }
+  #cover h1 {
+    font-size: 34px; letter-spacing: .3em;
+    color: var(--ink); margin: 0 0 8px; font-weight: normal;
+  }
+  #cover .sub { color: var(--dim); font-size: 14px; margin-bottom: 3em; }
+  #cover .lead { font-size: 18px; color: var(--ink); line-height: 2.4; }
+  #cv-continue { margin-top: 1.2em; color: var(--dim); font-size: 15px; }
+</style>
+</head>
+<body>
+
+<canvas id="rainfx"></canvas>
+<div id="flash"></div>
+
+<div id="cover">
+  <h1>记忆弹</h1>
+  <div class="sub">暂名 · 正式版竖切片 · 剧本格式 v0</div>
+  <div class="lead">
+    <span id="cv-title"></span><br>
+    <span class="w" id="go-start">载入初始记忆</span>（重新开始）
+    <div id="cv-continue" style="display:none"></div>
+  </div>
+</div>
+
+<header>记 忆 弹
+  <a href="./">← 选剧本</a>
+  <span class="mutebtn" title="音效开关">🔊</span>
+</header>
+
+<div id="hud">
+  <span id="hud-name"></span>
+  <span id="hud-badge"></span>
+  <span id="savetag"></span>
+  <span id="btn-archive">卷宗</span>
+</div>
+
+<main id="log"></main>
+
+<footer>
+  <div id="hintbar"></div>
+  <div id="inv"><span class="label">弹仓</span></div>
+</footer>
+
+<div id="archive">
+  <div id="arc-panel">
+    <div id="arc-head">案 卷 库<span id="arc-close">✕ 关闭</span></div>
+    <div id="arc-list"></div>
+  </div>
+</div>
+
+<script src="scripts/case1.zh.js"></script>
+<script src="js/engine.js"></script>
+<script>
+  bootGame(new URLSearchParams(location.search).get('ch') || 'case1');
+</script>
+</body>
+</html>
