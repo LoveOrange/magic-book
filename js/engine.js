@@ -84,7 +84,6 @@ const STATE = {
   mode: '',      // 当前渲染态（'' | 'memory'）
 };
 let selected = null;
-let printQueue = [];
 
 const $ = id => document.getElementById(id);
 
@@ -137,7 +136,41 @@ function sayLine(t, extraCls) {
 
 function divider(t) { sayLine(t, 'divider'); }
 
-function clearQueue() { printQueue.forEach(clearTimeout); printQueue = []; }
+/* ---------------- 文本节奏：事件队列 + 点击继续 ----------------
+ * 所有文本与动作先进队列，pump() 每次只消费约半屏的字数预算；
+ * 队列未空时显示 ▼，点击页面任意处（或空格/回车）继续。
+ */
+
+const CHUNK_CHARS = 72;  // 每次推进的字数预算
+const Q = [];            // 事件：{line, word, cls} | {div}
+
+function qClear() { Q.length = 0; }
+
+function updateMore() {
+  $('more').style.display = Q.length ? 'block' : 'none';
+}
+
+function pump() {
+  let budget = CHUNK_CHARS;
+  while (true) {
+    if (!Q.length && !checkWhens()) break;
+    if (!Q.length) continue;
+    const ev = Q.shift();
+    let said = 0;
+    if (ev.div !== undefined) {
+      divider(ev.div);
+      said = 4;
+    } else {
+      currentWord = ev.word || null;
+      const r = execAction(ev.line, ev.cls);
+      currentWord = null;
+      if (typeof r === 'number') said = r;
+    }
+    budget -= said;
+    if (budget <= 0 && Q.length) break;
+  }
+  updateMore();
+}
 
 /* ---------------- 道具 / 线索 / 卷宗 ---------------- */
 
@@ -209,8 +242,8 @@ function evalCond(expr) {
   });
 }
 
-/* 执行单行动作；返回 'goto' 表示流程已转移 */
-function execAction(t) {
+/* 执行单行动作；返回 'goto' 表示流程已转移，返回数字表示输出的字数 */
+function execAction(t, cls) {
   let m;
   if ((m = t.match(/^if\s+(.+?)\s*:\s*(.+)$/))) {
     if (!evalCond(m[1])) return;
@@ -233,7 +266,7 @@ function execAction(t) {
   }
   if ((m = t.match(/^goto\s+(\w+)/)))      { enterScene(m[1]); return 'goto'; }
   if ((m = t.match(/^nav\s+(\S+)/)))       { location.href = m[1]; return; }
-  sayLine(t);
+  return sayLine(t, cls).textContent.length;
 }
 
 let currentWord = null; // off 不带参数时置灰的目标
@@ -246,25 +279,23 @@ function offWord(id) {
 }
 
 function execBlock(block) {
-  currentWord = block.word;
-  for (const a of block.actions) {
-    if (execAction(a) === 'goto') { currentWord = null; return; }
-  }
-  if (block.once) offWord(block.word);
-  currentWord = null;
-  checkWhens();
+  if (block.once) offWord(block.word); // 立即置灰，防止文本放映期间重复触发
+  for (const a of block.actions) Q.push({ line: a, word: block.word });
+  pump();
 }
 
+/* 检查场景级自动触发；命中则把动作入队，返回 true */
 function checkWhens() {
   const sc = CH.scenes[STATE.scene];
-  if (!sc) return;
+  if (!sc) return false;
   for (const w of sc.whens) {
     if (!w.fired && evalCond(w.cond)) {
       w.fired = true;
-      execAction(w.action);
-      return;
+      Q.push({ line: w.action, word: null });
+      return true;
     }
   }
+  return false;
 }
 
 /* ---------------- 场景 ---------------- */
@@ -272,7 +303,7 @@ function checkWhens() {
 function enterScene(id) {
   const sc = CH.scenes[id];
   if (!sc) { console.error('场景不存在：' + id); return; }
-  clearQueue();
+  qClear();
   /* 上个场景的互动词随场景切换全部失效（存档以场景为粒度） */
   document.querySelectorAll('#log .w').forEach(el => el.classList.add('used'));
   STATE.scene = id;
@@ -284,20 +315,20 @@ function enterScene(id) {
   sc.whens.forEach(w => w.fired = false);
   saveGame();
 
-  if (sc.props.label) divider(sc.props.label);
-  const coda = sc.props.style === 'coda' ? ' coda' : '';
-  sc.flow.forEach((line, i) => {
-    printQueue.push(setTimeout(() => {
-      sayLine(line, coda);
-      if (i === sc.flow.length - 1) checkWhens();
-    }, i * 380));
-  });
-  if (!sc.flow.length) checkWhens();
+  if (sc.props.label) Q.push({ div: sc.props.label });
+  const coda = sc.props.style === 'coda' ? 'coda' : '';
+  for (const line of sc.flow) Q.push({ line, word: null, cls: coda });
 }
 
 /* ---------------- 点击分发 ---------------- */
 
 document.addEventListener('click', e => {
+  /* 文本未放完：底部道具栏/页眉/卷宗照常工作，其余点击一律视为「继续」 */
+  if (Q.length) {
+    if (e.target.closest('footer, header, #hud, #archive, #cover')) return;
+    pump();
+    return;
+  }
   const el = e.target.closest('.w[data-act]');
   if (!el || el.classList.contains('used')) return;
   const sc = CH.scenes[STATE.scene];
@@ -315,6 +346,14 @@ document.addEventListener('click', e => {
     execBlock(sc.blocks[id]);
   } else if (Object.keys(sc.blocks).some(k => k.startsWith(id + '@'))) {
     hint('（直接点没有用，似乎需要装填什么。）', true);
+  }
+});
+
+/* 键盘推进：空格 / 回车 */
+document.addEventListener('keydown', e => {
+  if ((e.key === ' ' || e.key === 'Enter') && Q.length) {
+    e.preventDefault();
+    pump();
   }
 });
 
@@ -575,6 +614,7 @@ function bootGame(chapterId) {
       renderItems();
       $('cover').classList.add('hide');
       enterScene(save.scene);
+      pump();
     };
   }
   $('go-start').onclick = () => {
@@ -582,6 +622,7 @@ function bootGame(chapterId) {
     localStorage.removeItem(saveKey());
     $('cover').classList.add('hide');
     enterScene(CH.meta.start || CH.order[0]);
+    pump();
   };
 
   const syncMute = () => document.querySelectorAll('.mutebtn')
