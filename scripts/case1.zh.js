@@ -20,6 +20,8 @@ window.MB_SCRIPTS['case1'] = String.raw`
 
 // ===================== 第一幕：科室 =====================
 
+@act 第一幕 · 科室
+
 @scene office
   label: 特殊记忆侦查科 · 凌晨
   bg: #14161d
@@ -94,6 +96,8 @@ window.MB_SCRIPTS['case1'] = String.raw`
       goto interro
 
 // ===================== 第三幕：问询室 =====================
+
+@act 第二幕 · 问询
 
 @scene interro
   label: 问询室三号
@@ -214,6 +218,8 @@ window.MB_SCRIPTS['case1'] = String.raw`
       goto office2
 
 // ===================== 第六幕：抉择 =====================
+
+@act 第三幕 · 归档
 
 @scene office2
   label: 特殊记忆侦查科 · 黎明前
