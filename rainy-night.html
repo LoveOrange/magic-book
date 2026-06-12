@@ -21,6 +21,7 @@
   html, body { margin: 0; padding: 0; }
   body {
     background: var(--bg);
+    transition: background-color 2.5s;
     color: var(--ink);
     font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
     font-size: 18px;
@@ -41,6 +42,7 @@
     max-width: 620px;
     margin: 0 auto;
     padding: 8px 24px 150px; /* 底部给道具栏留位置 */
+    position: relative; z-index: 1; /* 压在雨幕上方 */
   }
 
   main p {
@@ -95,6 +97,24 @@
     80% { transform: translateX(2px); }
   }
 
+  /* —— 氛围：文字雨 / 雷闪 / 暖色调 / 静音按钮 —— */
+  #rain {
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none;
+  }
+  #flash {
+    position: fixed; inset: 0; z-index: 8;
+    pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at 50% -10%,
+      rgba(235, 240, 255, .9), rgba(235, 240, 255, .25) 55%, transparent 80%);
+  }
+  body.warm { background-color: #1c1820; } /* 进入书房后偏暖的台灯色 */
+  #mute {
+    position: absolute; right: 18px; top: 12px;
+    cursor: pointer; font-size: 15px; opacity: .75;
+    letter-spacing: 0;
+  }
+
   /* —— 底部：提示条 + 道具栏 —— */
   footer {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
@@ -134,7 +154,7 @@
   /* —— 标题页 —— */
   #cover {
     position: fixed; inset: 0; z-index: 10;
-    background: var(--bg);
+    background: rgba(20, 22, 29, .86); /* 半透明，让封面后透出雨幕 */
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     text-align: center; padding: 24px;
@@ -151,6 +171,9 @@
 </head>
 <body>
 
+<canvas id="rain"></canvas>
+<div id="flash"></div>
+
 <div id="cover">
   <h1>雨夜的书房</h1>
   <div class="sub">文字冒险 · 玩法 DEMO</div>
@@ -163,6 +186,7 @@
 
 <header>雨 夜 的 书 房
   <a href="./" style="position:absolute;left:18px;top:14px;color:var(--dim);text-decoration:none;letter-spacing:.1em;">← 选剧本</a>
+  <span id="mute" title="音效开关">🔊</span>
 </header>
 <main id="log"></main>
 
@@ -209,9 +233,9 @@ function say(text, cls) {
   return p;
 }
 const think   = t => say('（' + t + '）', 'think');
-const clue    = t => say('【线索：' + t + '】', 'clue');
+const clue    = t => { FX.clue(); return say('【线索：' + t + '】', 'clue'); };
 const divider = t => say('— ' + t + ' —', 'divider');
-const objection = () => say('——等等！', 'obj');
+const objection = () => { FX.stab(); return say('——等等！', 'obj'); };
 
 function off(id) {
   document.querySelectorAll(`.w[data-act="${id}"]`)
@@ -231,6 +255,7 @@ function addItem(id) {
   chip.textContent = it.icon + ' ' + it.name;
   chip.onclick = () => select(selected === id ? null : id);
   $inv.appendChild(chip);
+  FX.get();
   say('【获得道具：' + it.name + '】', 'get');
 }
 
@@ -273,6 +298,185 @@ document.addEventListener('click', e => {
 });
 
 /* ====================================================================
+ *  氛围部分：文字雨（canvas）+ 合成音效（Web Audio，无音频文件）
+ * ================================================================== */
+
+/* 雷闪 / 屏幕闪光，strength 0~1 */
+function flash(strength = 1) {
+  const f = document.getElementById('flash');
+  f.style.transition = 'none';
+  f.style.opacity = strength;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      f.style.transition = 'opacity .6s';
+      f.style.opacity = 0;
+    }));
+}
+
+/* 视觉雨：用「丶丨丿」笔画当雨滴，远近两层 */
+const RAIN = (() => {
+  const cv = document.getElementById('rain');
+  const cx = cv.getContext('2d');
+  const CHARS = ['丶', '丨', '丿'];
+  let raf = null, running = true;
+
+  function resize() { cv.width = innerWidth; cv.height = innerHeight; }
+  resize(); addEventListener('resize', resize);
+
+  function make(fromTop) {
+    const far = Math.random() < .6;
+    return {
+      x: Math.random() * (innerWidth + 60),
+      y: fromTop ? -20 : Math.random() * innerHeight,
+      v: far ? 2.2 + Math.random() * 1.5 : 4.5 + Math.random() * 2.5,
+      size: far ? 10 : 15,
+      a: far ? .10 : .20,
+      ch: CHARS[Math.floor(Math.random() * CHARS.length)],
+    };
+  }
+  const drops = Array.from({ length: Math.min(90, innerWidth / 7) }, () => make(false));
+
+  function step() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    cx.fillStyle = '#aebadb';
+    for (let i = 0; i < drops.length; i++) {
+      const d = drops[i];
+      d.y += d.v;
+      d.x -= d.v * .25; // 斜风
+      if (d.y > cv.height + 20 || d.x < -20) drops[i] = make(true);
+      cx.globalAlpha = d.a;
+      cx.font = d.size + 'px serif';
+      cx.fillText(d.ch, d.x, d.y);
+    }
+    if (running) raf = requestAnimationFrame(step);
+  }
+  raf = requestAnimationFrame(step);
+
+  return {
+    stop() { // 雨渐渐停了
+      cv.style.transition = 'opacity 4s';
+      cv.style.opacity = 0;
+      setTimeout(() => { running = false; cancelAnimationFrame(raf); }, 4200);
+    }
+  };
+})();
+
+/* 合成音效 */
+const FX = (() => {
+  let ctx = null, master = null, rainGain = null, thunderTimer = null;
+  let muted = false, calmed = false;
+
+  function ensure() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.connect(ctx.destination);
+    }
+    if (ctx.state === 'suspended') ctx.resume();
+  }
+
+  function noiseBuffer(sec) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate * sec, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  /* 雨声底噪：白噪声过带通滤波后循环 */
+  function startRain() {
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(3);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = .5;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2600;
+    rainGain = ctx.createGain();
+    rainGain.gain.value = 0;
+    src.connect(bp); bp.connect(lp); lp.connect(rainGain); rainGain.connect(master);
+    src.start();
+    rainGain.gain.linearRampToValueAtTime(.05, ctx.currentTime + 2);
+  }
+
+  /* 远处的闷雷：低通噪声 + 微弱闪光，随机间隔 */
+  function rumble() {
+    if (calmed) return;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(2.5);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 120;
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(.18, t + .15);
+    g.gain.exponentialRampToValueAtTime(.001, t + 2.4);
+    src.connect(lp); lp.connect(g); g.connect(master);
+    src.start();
+    flash(.18);
+  }
+  function scheduleThunder() {
+    thunderTimer = setTimeout(() => {
+      rumble();
+      if (!calmed) scheduleThunder();
+    }, 15000 + Math.random() * 20000);
+  }
+
+  /* 单振荡器短音 */
+  function tone(type, freq, dur, vol, freqEnd) {
+    ensure();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    const t = ctx.currentTime;
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(.001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur);
+  }
+
+  /* 高通噪声短促一响：翻找、纸张 */
+  function rustle(dur = .16, vol = .1) {
+    ensure();
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(dur);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 3200;
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(.001, t + dur);
+    src.connect(hp); hp.connect(g); g.connect(master);
+    src.start();
+  }
+
+  return {
+    start()  { ensure(); startRain(); scheduleThunder(); },
+    knock()  { [0, 220, 440].forEach(d => setTimeout(() => tone('sine', 95, .12, .5, 60), d)); },
+    paper()  { rustle(); },
+    unlock() { tone('square', 1100, .05, .12); setTimeout(() => tone('square', 700, .09, .15), 90); },
+    get()    { tone('sine', 880, .12, .16); setTimeout(() => tone('sine', 1318, .25, .14), 110); },
+    clue()   { tone('sine', 1560, .3, .1); },
+    stab()   { tone('sawtooth', 520, .25, .22, 130); flash(.8); },
+    calm() { /* 真相大白，雨停了 */
+      calmed = true;
+      clearTimeout(thunderTimer);
+      if (rainGain) rainGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 3.5);
+      RAIN.stop();
+    },
+    toggle() {
+      muted = !muted;
+      if (master) master.gain.value = muted ? 0 : 1;
+      return muted;
+    },
+  };
+})();
+
+document.getElementById('mute').onclick = e => {
+  e.target.textContent = FX.toggle() ? '🔇' : '🔊';
+};
+
+/* ====================================================================
  *  剧情部分（故事都写在下面，随便改）
  * ================================================================== */
 
@@ -293,6 +497,7 @@ function scene1() {
 
 /* —— 第二幕：书房 —— */
 function scene2() {
+  document.body.classList.add('warm'); // 台灯的暖色
   divider('书房');
   say('书房里空无一人。[窗户|window]大开着，雨点斜斜地打在窗台上。' +
       '[书桌|desk]上散落着纸页，台灯还亮着。' +
@@ -334,6 +539,7 @@ const ACTIONS = {
     items: {
       key() {
         off('door'); off('pot'); off('painting');
+        FX.unlock();
         say('钥匙插进锁孔，「咔哒」一声轻响。你深吸一口气，推开了门。');
         scene2();
       }
@@ -463,6 +669,7 @@ const ACTIONS = {
         say('「为了这个。」你把保险单拍在书桌上。「三十万保额，上周刚刚生效。怀表没有被偷——它只是需要『被偷』。」');
         say('「自导自演的失窃案，骗的是保险公司的钱。挂画后面那句『记得续保』，也是您亲手写的吧。」');
         say('舅舅瘫坐进椅子里，半晌，发出一声长长的叹息。窗外，雨停了。');
+        FX.calm(); // 雨声与雨幕一起淡出
         divider('真相大白');
         say('DEMO 到此为止，感谢游玩。点击[重新开始|restart]再来一局。', 'sys');
       }
@@ -472,8 +679,19 @@ const ACTIONS = {
   restart: { click() { location.reload(); } },
 };
 
+/* —— 给翻找类动作统一挂上音效 —— */
+['pot', 'painting', 'desk', 'drawer', 'shelf', 'logbook', 'window'].forEach(id => {
+  const orig = ACTIONS[id].click;
+  if (orig) ACTIONS[id].click = () => { FX.paper(); orig(); };
+});
+{
+  const orig = ACTIONS.door.click;
+  ACTIONS.door.click = () => { FX.knock(); orig(); };
+}
+
 /* —— 标题页 —— */
 document.getElementById('startword').onclick = () => {
+  FX.start(); // 浏览器要求音频由用户手势触发，封面点击正好解锁
   document.getElementById('cover').classList.add('hide');
   scene1();
 };
