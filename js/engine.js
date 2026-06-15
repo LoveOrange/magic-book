@@ -165,8 +165,10 @@ const STATE = {
   seen: {},           // sceneId -> [点击过的词 id]
   bookmarks: [],      // 页索引
   whensFired: {},     // sceneId -> [已触发的 when 序号]
+  log: [],            // 结构化日志：[{scene,sp,act,items:[{text,cls}]}]，与 PAGES 同序
+  used: [],           // 已置灰的词：['pageIdx:wordId']
 };
-const PAGES = [];     // {scene, sp, act, el}，与 #log 中的 .page 一一对应
+const PAGES = [];     // {scene, sp, act, el}，与 #log / STATE.log 一一对应（运行时视图）
 let viewIdx = -1;     // 当前查看的页
 let curScene = null;  // 当前正在写入的场景（pump 执行期间）
 let curPageIdx = -1;  // 当前正在写入的页（pump 执行期间）
@@ -175,7 +177,7 @@ let IS_DRAFT = false;
 
 const $ = id => document.getElementById(id);
 
-const SAVE_FMT = 4;
+const SAVE_FMT = 5;   // 5：存档改为结构化 log（不再快照 innerHTML）
 const GATE_HINT = '（总觉得……还有什么没查清的。）';
 
 function saveKey() { return 'mb-save-' + (IS_DRAFT ? 'draft-' : '') + CH.meta.id; }
@@ -187,7 +189,8 @@ function saveGame() {
       v: CH.meta.version,
       scene: STATE.scene,
       sp: STATE.sp,
-      html: $('log').innerHTML,   // 全文快照：互动展开也原样恢复
+      log: STATE.log,             // 结构化日志（呈现中立，读档时 renderFull 重画）
+      used: STATE.used,
       flags: [...STATE.flags],
       items: STATE.items,
       clues: STATE.clues,
@@ -212,15 +215,16 @@ function loadSave() {
 
 /* ---------------- 页 ---------------- */
 
-function newPage(sid, sp) {
-  const sc = CH.scenes[sid];
+/* 仅建 DOM 页（不写日志）：play 与 restore 共用 */
+function mountPage(scene, sp, act, bookmarked) {
+  const sc = CH.scenes[scene];
   const sec = document.createElement('section');
   sec.className = 'page';
-  sec.dataset.scene = sid;
+  sec.dataset.scene = scene;
   sec.dataset.sp = sp;
-  sec.dataset.act = sc.act;
+  sec.dataset.act = act;
   const bk = document.createElement('span');
-  bk.className = 'bk';
+  bk.className = 'bk' + (bookmarked ? ' on' : '');
   bk.dataset.ui = 'bk';
   bk.textContent = '🔖';
   bk.title = '书签';
@@ -232,8 +236,15 @@ function newPage(sid, sp) {
     sec.appendChild(h);
   }
   $('log').appendChild(sec);
-  PAGES.push({ scene: sid, sp, act: sc.act, el: sec });
+  PAGES.push({ scene, sp, act, el: sec });
   return PAGES.length - 1;
+}
+
+/* play 路径：新开一页 = 记一条日志 + 建 DOM（二者同序） */
+function newPage(sid, sp) {
+  const sc = CH.scenes[sid];
+  STATE.log.push({ scene: sid, sp, act: sc.act, items: [] });
+  return mountPage(sid, sp, sc.act, false);
 }
 
 function lastPageIdxOf(sid) {
@@ -384,10 +395,12 @@ function fmt(s) {
     (_, w, id) => `<span class="w" data-act="${id || w}">${w}</span>`);
 }
 
-function sayLine(t, extraCls) {
-  if (t.startsWith(': ')) t = t.slice(2); // 块内文本行的可选前缀
-  const page = PAGES[curPageIdx >= 0 ? curPageIdx : PAGES.length - 1];
+/* 把一条日志项渲染成 <p> 追加到第 pi 页（animate=false 用于读档重画） */
+function renderStatement(text, extraCls, pi, animate) {
+  const page = PAGES[pi];
   if (!page) return { textContent: '' };
+  let t = text;
+  if (t.startsWith(': ')) t = t.slice(2); // 块内文本行的可选前缀
   const p = document.createElement('p');
   let cls = extraCls || '', m;
   if (t.startsWith('! ')) { cls += ' obj'; t = t.slice(2); }
@@ -411,10 +424,25 @@ function sayLine(t, extraCls) {
   if (sc && sc.props.mode === 'memory') cls += ' mem';
   p.className = cls.trim();
   if (!p.innerHTML) p.innerHTML = fmt(t);
-  p.style.animationDelay = Math.min(sayDelay, 480) + 'ms'; // 同批段落级联入场
-  sayDelay += 60;
+  if (animate) {
+    p.style.animationDelay = Math.min(sayDelay, 480) + 'ms'; // 同批段落级联入场
+    sayDelay += 60;
+  } else {
+    p.style.animation = 'none'; // 读档整本重画，不逐条入场
+  }
+  p.querySelectorAll('.w[data-act]').forEach(el => {        // 还原已置灰的词
+    if (STATE.used.includes(pi + ':' + el.dataset.act)) el.classList.add('used');
+  });
   page.el.appendChild(p);
   return p;
+}
+
+/* 输出一行：记入结构化日志（存档的源），再渲染 */
+function sayLine(t, extraCls) {
+  const pi = curPageIdx >= 0 ? curPageIdx : PAGES.length - 1;
+  if (pi < 0 || !STATE.log[pi]) return { textContent: '' };
+  STATE.log[pi].items.push({ text: t, cls: extraCls || '' });
+  return renderStatement(t, extraCls || '', pi, true);
 }
 
 /* ---------------- 推进：页级节奏（一页文字一次性全显） ---------------- */
@@ -447,7 +475,7 @@ function runLines(lines, sid, pageIdx, word, cls) {
     const r = execAction(line, cls);
     currentWord = null;
     if (r === 'goto') {
-      if (word) offWord(word); // 出口词用毕置灰
+      if (word) offWord(word, pageIdx); // 出口词用毕置灰
       curScene = null; curPageIdx = -1;
       return 'goto';
     }
@@ -594,14 +622,25 @@ function execAction(t, cls) {
   return sayLine(t, cls).textContent.length;
 }
 
-function offWord(id) {
+/* 置灰一个词并记入 STATE.used（以页为范围，便于读档还原） */
+function offWord(id, pi) {
   if (!id) return;
-  document.querySelectorAll(`#log .w[data-act="${id}"]`)
-    .forEach(el => el.classList.add('used'));
+  if (pi == null) pi = curPageIdx;
+  const rec = i => { const k = i + ':' + id; if (!STATE.used.includes(k)) STATE.used.push(k); };
+  if (pi != null && pi >= 0 && PAGES[pi]) {
+    PAGES[pi].el.querySelectorAll(`.w[data-act="${id}"]`).forEach(el => el.classList.add('used'));
+    rec(pi);
+  } else {
+    PAGES.forEach((p, i) => {                                  // 兜底：页号未知时全局置灰
+      let hit = false;
+      p.el.querySelectorAll(`.w[data-act="${id}"]`).forEach(el => { el.classList.add('used'); hit = true; });
+      if (hit) rec(i);
+    });
+  }
 }
 
 function execBlock(block, sid, pageIdx) {
-  if (block.once) offWord(block.word); // 立即置灰，防止重复触发
+  if (block.once) offWord(block.word, pageIdx); // 立即置灰，防止重复触发
   const pageEl = PAGES[pageIdx] && PAGES[pageIdx].el;
   const before = pageEl ? pageEl.lastElementChild : null;
   const r = runLines(block.actions, sid, pageIdx, block.word);
@@ -1105,7 +1144,7 @@ const RAINFX = (() => {
 
 /* ---------------- 启动 ---------------- */
 
-/* 读档：恢复全文快照与全部状态 */
+/* 读档：从结构化 State 重画整本（renderFull） */
 function restoreGame(save) {
   STATE.flags = new Set(save.flags);
   STATE.items = save.items;
@@ -1114,18 +1153,18 @@ function restoreGame(save) {
   STATE.seen = save.seen || {};
   STATE.bookmarks = save.bookmarks || [];
   STATE.whensFired = save.whensFired || {};
+  STATE.used = save.used || [];
+  STATE.log = save.log || [];
   STATE.scene = save.scene;
   STATE.sp = save.sp || 0;
 
-  $('log').innerHTML = save.html;
+  $('log').innerHTML = '';
   PAGES.length = 0;
-  for (const sec of document.querySelectorAll('#log .page')) {
-    PAGES.push({
-      scene: sec.dataset.scene,
-      sp: +sec.dataset.sp || 0,
-      act: +sec.dataset.act || 0,
-      el: sec,
-    });
+  for (const sc of Object.values(CH.scenes)) sc.whens.forEach(w => w.fired = false);
+  for (let i = 0; i < STATE.log.length; i++) {                // 从日志重建每一页
+    const lp = STATE.log[i];
+    mountPage(lp.scene, lp.sp, lp.act, STATE.bookmarks.includes(i));
+    for (const it of lp.items) renderStatement(it.text, it.cls, i, false);
   }
   for (const [sid, idxs] of Object.entries(STATE.whensFired)) {
     const sc = CH.scenes[sid];
@@ -1137,11 +1176,25 @@ function restoreGame(save) {
   updateMore(); updatePagebar();
 }
 
+/* 全量重置运行时（重新开始，免依赖刷新页面） */
+function resetState() {
+  STATE.flags = new Set();
+  STATE.items = []; STATE.clues = []; STATE.archive = [];
+  STATE.seen = {}; STATE.bookmarks = []; STATE.whensFired = {};
+  STATE.log = []; STATE.used = [];
+  STATE.scene = null; STATE.sp = 0;
+  PAGES.length = 0; viewIdx = -1; selected = null;
+  $('log').innerHTML = '';
+  for (const sc of Object.values(CH.scenes)) sc.whens.forEach(w => w.fired = false);
+  renderItems();
+}
+
 let pendingSave = null;
 
 function startNewGame() {
   FX.unlockAudio();
   localStorage.removeItem(saveKey());
+  resetState();
   $('cover').classList.add('hide');
   enterScene(CH.meta.start || CH.order[0]);
 }
