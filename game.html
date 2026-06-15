@@ -148,11 +148,25 @@
     to   { opacity: 1; transform: none; }
   }
 
-  p.speech b {
-    color: #b9c2d8; font-weight: normal;
-    margin-right: .8em;
+  /* 台词：左侧头像框 + 名牌 + 「」引文 */
+  p.speech { display: flex; align-items: flex-start; gap: 10px; }
+  .ava {
+    flex-shrink: 0;
+    width: 30px; height: 30px;
+    border: 1px solid; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; line-height: 1;
+    margin-top: 4px;
+    background: rgba(27, 30, 40, .55);
+    opacity: .9;
   }
-  p.speech b::after { content: ''; }
+  .spb { flex: 1; min-width: 0; }
+  p.speech b {
+    display: block;
+    font-weight: normal;
+    font-size: 12px; letter-spacing: .15em;
+    line-height: 1.7; opacity: .75;
+  }
   p.think  { color: var(--dim); font-size: 16px; }
   p.get    { color: var(--get); }
   p.clue   { color: var(--clue); }
@@ -172,11 +186,8 @@
     color: var(--mem);
     text-shadow: 0 0 8px rgba(157, 184, 221, .25);
   }
-  p.mem.speech b { color: #c4d6ef; }
-
   /* 系统语音（置于 .mem 之后，记忆潜入中仍保持系统色） */
   p.sysv { color: #79c6cf; font-size: 16.5px; }
-  p.sysv b { color: #79c6cf; opacity: .75; letter-spacing: .08em; }
 
   .w {
     color: var(--accent);
@@ -205,7 +216,12 @@
     75% { transform: translate(2px, 1px); }
   }
 
-  /* —— 背景效果层 / 闪光 —— */
+  /* —— 背景画层（ASCII 场景）/ 效果层 / 闪光 —— */
+  #bgart {
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; opacity: 0;
+    transition: opacity 1.2s;
+  }
   #rainfx { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0; }
   #flash {
     position: fixed; inset: 0; z-index: 8;
@@ -397,6 +413,7 @@
 </head>
 <body>
 
+<canvas id="bgart"></canvas>
 <canvas id="rainfx"></canvas>
 <div id="flash"></div>
 

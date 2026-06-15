@@ -45,8 +45,10 @@ function check(name, cond, extra = '') {
   });
   const hintText = () => page.evaluate(() =>
     document.getElementById('hintbar').textContent);
-  /* 点击阅读区底部的空白（main 内、低于正文、高于道具栏） */
-  const clickBlank = () => page.mouse.click(400, 760);
+  /* 翻页手势：右侧边栏=前进，左侧边栏=后退（视口 800 宽，两侧约 70px） */
+  const turnFwd  = () => page.mouse.click(770, 450);
+  const turnBack = () => page.mouse.click(30, 450);
+  const clickCenter = () => page.mouse.click(400, 450);
 
   await page.click('[data-ui="start"]');
   check('开局进入 office 第 1 页', await cur() === 'office/0');
@@ -54,22 +56,29 @@ function check(name, cond, extra = '') {
   await page.click('.page.cur .w[data-act="desk"]');
   check('点击互动词就地展开、不翻页', await cur() === 'office/0');
 
-  await clickBlank();
-  check('空白点击翻到第 2 页', await cur() === 'office/1');
+  await clickCenter();
+  check('正文中央点击不翻页（可划选）', await cur() === 'office/0');
 
-  await clickBlank();
+  await turnFwd();
+  check('右侧翻到第 2 页', await cur() === 'office/1');
+
+  await turnBack();
+  check('左侧回到第 1 页', await cur() === 'office/0');
+  await turnFwd();
+
+  await turnFwd();
   check('门槛拦截：未读卷宗停留第 2 页', await cur() === 'office/1');
   check('门槛提示出现', (await hintText()).includes('卷宗'));
 
   await page.click('.page.cur .w[data-act="file"]');
-  await clickBlank();
+  await turnFwd();
   check('读卷宗后解锁第 3 页', await cur() === 'office/2');
 
   /* 回归：页码回跳第 1 页（曾因事件冒泡误判翻到第 2 页） */
   await page.click('#pgrow .pg');
   check('页码回跳第 1 页', await cur() === 'office/0');
-  await clickBlank();
-  check('旧页空白点击前进一页', await cur() === 'office/1');
+  await turnFwd();
+  check('旧页右侧翻动前进一页', await cur() === 'office/1');
 
   /* 回到前沿，走完教学拿读取弹 */
   const pgs = await page.$$('#pgrow .pg');
@@ -77,7 +86,7 @@ function check(name, cond, extra = '') {
   await page.click('.page.cur .w[data-act="go_sys"]');
   check('出口词进入 tutorial', await cur() === 'tutorial/0');
   await page.click('.page.cur .w[data-act="tut1"]');
-  await clickBlank();
+  await turnFwd();
   check('校准后解锁 tutorial 第 2 页', await cur() === 'tutorial/1');
   await page.click('.page.cur .w[data-act="tut2"]');
 

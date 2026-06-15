@@ -12,12 +12,20 @@ window.MB_SCRIPTS['case1'] = String.raw`
   title: 第一案 · 雨与当铺
   protagonist: 龚俊仁
   badge: 2077-09
-  version: 0.4
+  version: 0.5
   format: 0.1
   start: office
 
 @items
   bullet_read: 🔵 读取弹 | 试验批次。命中后展开目标的浅层记忆，读取者进入旁观位。不干预，不久留。
+
+@cast
+  龚俊仁: 龚 | #7ea6e0
+  鲍守义: 鲍 | #c9a06a
+  科长: 科 | #8a93ad
+  郭长根: 郭 | #9fae8a
+  系统: ◈ | #79c6cf
+  画外音: ？ | #e86a5e
 
 // ===================== 第一幕 =====================
 
@@ -28,6 +36,7 @@ window.MB_SCRIPTS['case1'] = String.raw`
   bg: #14161d
   amb: rain
   fx: rain
+  art: office
 
   // —— 第 1 页：纯背景与风味互动，不影响推进 ——
   凌晨两点，雨敲着特殊记忆侦查科的窗户。
@@ -71,6 +80,7 @@ window.MB_SCRIPTS['case1'] = String.raw`
 
 @scene tutorial
   label: 记忆侦查辅助系统
+  art: terminal
 
   // —— 第 1 页：系统开机 + 校准教学 ——
   你戴上目镜，按下终端的电源键。视界泛起一层淡淡的蓝。
@@ -120,6 +130,7 @@ window.MB_SCRIPTS['case1'] = String.raw`
   bg: #161a1f
   amb: off
   fx: off
+  art: interro
 
   // —— 第 1 页：场面与观察 ——
   问询室三号，地下一层。一张铁桌，两把椅子，一面[单向镜|mirror]。
@@ -161,6 +172,7 @@ window.MB_SCRIPTS['case1'] = String.raw`
   amb: rain
   fx: rain
   mode: memory
+  art: alley
 
   // —— 第 1 页：潜入与方位 ——
   雨声。你站在郭长根的眼睛后面，像隔着一层结霜的玻璃看世界。
@@ -210,6 +222,7 @@ window.MB_SCRIPTS['case1'] = String.raw`
   bg: #161a1f
   amb: off
   fx: off
+  art: interro
 
   // —— 第 1 页：惊醒 ——
   「哗啦」一声，世界翻了个面。
@@ -250,6 +263,7 @@ window.MB_SCRIPTS['case1'] = String.raw`
   bg: #14161d
   amb: rain
   fx: rain
+  art: office
 
   // —— 第 1 页：科长的天平 ——
   回到科里，最里间的灯还亮着——科长的办公室。
@@ -283,6 +297,7 @@ window.MB_SCRIPTS['case1'] = String.raw`
   bg: #0e1016
   amb: off
   fx: off
+  art: archive
   style: coda
 
   三天后，结案归档的回执送到了你的工位。

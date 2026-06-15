@@ -18,10 +18,10 @@
 
 /* ---------------- 解析器 ---------------- */
 
-const SCENE_PROPS = ['label', 'bg', 'amb', 'music', 'fx', 'mode', 'style'];
+const SCENE_PROPS = ['label', 'bg', 'amb', 'music', 'fx', 'mode', 'style', 'art'];
 
 function parseScript(src) {
-  const ch = { meta: {}, items: {}, scenes: {}, order: [], acts: [] };
+  const ch = { meta: {}, items: {}, cast: {}, scenes: {}, order: [], acts: [] };
   let mode = null, scene = null, block = null, blockIndent = 0;
 
   for (const raw of src.split('\n')) {
@@ -33,6 +33,7 @@ function parseScript(src) {
 
     if (t === '@meta')  { mode = 'meta';  continue; }
     if (t === '@items') { mode = 'items'; continue; }
+    if (t === '@cast')  { mode = 'cast';  continue; }
     if ((m = t.match(/^@act\s+(.+)$/))) { ch.acts.push(m[1].trim()); continue; }
     if ((m = t.match(/^@scene\s+(\S+)/))) {
       scene = {
@@ -58,6 +59,16 @@ function parseScript(src) {
         const [head, desc = ''] = t.slice(i + 1).split('|').map(s => s.trim());
         const sp = head.indexOf(' ');
         ch.items[id] = { icon: head.slice(0, sp), name: head.slice(sp + 1).trim(), desc };
+      }
+      continue;
+    }
+    if (mode === 'cast') {
+      /* 人物表：名字: 头像字符 | 颜色（缺省头像取名字首字） */
+      const i = t.indexOf(':');
+      if (i > 0) {
+        const name = t.slice(0, i).trim();
+        const [icon, color = ''] = t.slice(i + 1).split('|').map(s => s.trim());
+        ch.cast[name] = { icon: icon || name[0], color: color || '' };
       }
       continue;
     }
@@ -241,6 +252,7 @@ function showPage(i) {
   if (sc.props.bg) document.body.style.backgroundColor = sc.props.bg;
   if (sc.props.amb) FX.amb(sc.props.amb);
   if (sc.props.fx) runFx(sc.props.fx === 'off' ? 'fxoff' : sc.props.fx);
+  BGART.show(sc.props.art);
   document.body.classList.toggle('memory', sc.props.mode === 'memory');
   updatePagebar();
   updateMore();
@@ -384,7 +396,14 @@ function sayLine(t, extraCls) {
     else {
       cls += ' speech';
       if (m[1] === '系统') cls += ' sysv'; // 记忆侦查辅助系统的语音
-      t = `<b>${m[1]}</b>` + fmt(m[3]); p.innerHTML = t;
+      const cast = (CH.cast || {})[m[1]] || {};
+      const color = cast.color || '#8a93ad';
+      const glyph = cast.icon || m[1][0];
+      let body = m[3];
+      if (!/^[「『]/.test(body)) body = '「' + body + '」'; // 台词自动加引号
+      p.innerHTML =
+        `<span class="ava" style="color:${color};border-color:${color}">${glyph}</span>` +
+        `<span class="spb"><b style="color:${color}">${m[1]}</b>${fmt(body)}</span>`;
     }
     if (!p.innerHTML) t = fmt(t);
   }
@@ -458,10 +477,23 @@ function nextPage() {
   }
 }
 
-/* 统一的「继续」：回翻时向后翻已读页 → 前沿解锁下一页 */
+/* 统一的「前进」：回翻时向后翻已读页 → 前沿解锁下一页 */
 function advance() {
   if (viewIdx >= 0 && viewIdx < PAGES.length - 1) { showPage(viewIdx + 1); return; }
   nextPage();
+}
+
+/* 「后退」：回看上一页（已解锁页之间自由翻动） */
+function pageBack() {
+  if (viewIdx > 0) showPage(viewIdx - 1);
+}
+
+/* 正文列的半宽（CSS px）：此宽度内为不翻页的阅读/选词区，两侧为翻页边栏。
+ * 背景画的留白遮罩也用它，使「能翻页的地方」与「画出现的地方」视觉一致。 */
+function textHalfPx() {
+  const W = innerWidth;
+  if (W < 680) return W * 0.34;        // 窄屏：中间 68% 可选，两侧各 16% 翻页
+  return Math.min(330, W / 2 - 40);    // 宽屏：中间≈正文列，两侧留白翻页
 }
 
 /* ---------------- 道具 / 线索 / 卷宗 ---------------- */
@@ -613,7 +645,7 @@ function enterScene(id) {
   STATE.sp = 0;
   const idx = newPage(id, 0);
   showPage(idx);
-  if (idx === 0) hint('点击发亮的词语互动；点击空白处翻页。', true);
+  if (idx === 0) hint('点击发亮的词互动；点屏幕右侧翻下一页，左侧回上一页（正文区可自由划选）。', true);
   if (runLines(sc.pages[0].lines, id, idx, null, pageCls(sc)) !== 'goto') {
     checkWhens();
     saveGame();
@@ -687,17 +719,24 @@ document.addEventListener('click', e => {
   /* 2. 阅读区互动词 */
   const el = e.target.closest('main .w[data-act]');
   if (el && !el.classList.contains('used')) { wordClick(el); return; }
-  /* 3. 翻页：仅阅读区内的空白点击 */
-  if (e.target.closest('main')) advance();
+  /* 3. 翻页手势：只有正文两侧的边栏触发；正文区可自由划选、不翻页 */
+  if (e.target.closest('footer, header, #hud, #pagebar, #archive, #finder, #cover')) return;
+  const sel = window.getSelection && String(window.getSelection());
+  if (sel && sel.trim()) return;       // 正在/刚划选文字：吞掉本次点击，绝不翻页
+  const half = textHalfPx();
+  if (e.clientX < innerWidth / 2 - half) pageBack();
+  else if (e.clientX > innerWidth / 2 + half) advance();
+  /* 中间正文区：什么都不做（留给阅读与选词） */
 });
 
-/* 键盘推进：空格 / 回车 = 翻页 */
+/* 键盘：空格/回车/→ 前进，← 后退 */
 document.addEventListener('keydown', e => {
-  if ((e.key === ' ' || e.key === 'Enter') && CH &&
-      !e.target.closest('input, textarea') &&
-      !document.querySelector('#cover:not(.hide)')) {
-    e.preventDefault();
-    advance();
+  if (!CH || e.target.closest('input, textarea') ||
+      document.querySelector('#cover:not(.hide)')) return;
+  if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') {
+    e.preventDefault(); advance();
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault(); pageBack();
   }
 });
 
@@ -879,6 +918,136 @@ const FX = (() => {
       return muted;
     },
     isMuted() { return muted; },
+  };
+})();
+
+/* ---------------- 背景画层：1-bit 抖动场景画（奥布拉丁风） ----------------
+ * 场景属性 art: <名字> 引用内置画库。每个场景是一段灰度画法，经 8×8 Bayer
+ * 有序抖动转为 1-bit 黑白点阵，再用「中间留白」遮罩裁出——只在正文两侧的
+ * 边栏显现，不与文字争抢。画库由引擎随版本扩充（工坊剧本只能引名字）。
+ */
+
+const BAYER8 = [
+   0,32, 8,40, 2,34,10,42, 48,16,56,24,50,18,58,26,
+  12,44, 4,36,14,46, 6,38, 60,28,52,20,62,30,54,22,
+   3,35,11,43, 1,33, 9,41, 51,19,59,27,49,17,57,25,
+  15,47, 7,39,13,45, 5,37, 63,31,55,23,61,29,53,21,
+];
+
+const SCENES = {
+  // 深夜办公室：上部一排百叶窗（竖向亮条），地平线，桌面剪影
+  office(g, w, h) {
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    const top = h * 0.10, wh = h * 0.34;
+    g.fillStyle = '#36405a'; g.fillRect(0, top, w, wh);         // 窗
+    for (let x = 0; x < w; x += Math.max(8, w / 38)) {
+      g.fillStyle = '#9fb2da'; g.fillRect(x, top, Math.max(3, w / 110), wh);
+    }
+    g.fillStyle = '#11151c'; g.fillRect(0, top + wh, w, h);     // 墙
+    g.fillStyle = '#1c2230'; g.fillRect(0, h * 0.70, w, h);     // 地
+    for (let i = 0; i < 4; i++) {                               // 工位剪影
+      const x = w * (0.08 + i * 0.27);
+      g.fillStyle = '#2b3346'; g.fillRect(x, h * 0.60, w * 0.16, h * 0.12);
+    }
+  },
+  // 系统终端：横向扫描线 + 中央柔光（中央会被遮罩裁掉，留边栏扫描线）
+  terminal(g, w, h) {
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    const grd = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.6);
+    grd.addColorStop(0, '#3f5e9a'); grd.addColorStop(1, '#05070c');
+    g.fillStyle = grd; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#7fa0d8';
+    for (let y = 0; y < h; y += Math.max(4, h / 70)) g.fillRect(0, y, w, 1);
+  },
+  // 审讯室：顶部吊灯光锥 + 两侧站立剪影
+  interro(g, w, h) {
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#9fb2da'; g.beginPath();
+    g.moveTo(w / 2, 0); g.lineTo(w * 0.18, h); g.lineTo(w * 0.82, h);
+    g.closePath(); g.globalAlpha = 0.5; g.fill(); g.globalAlpha = 1;
+    g.fillStyle = '#252d40';                                    // 两侧人影
+    g.fillRect(w * 0.06, h * 0.34, w * 0.12, h * 0.66);
+    g.fillRect(w * 0.82, h * 0.34, w * 0.12, h * 0.66);
+    g.fillStyle = '#161b26'; g.fillRect(0, h * 0.80, w, h);     // 地
+  },
+  // 当铺后巷：砖缝横线 + 斜雨 + 右侧亮着的门
+  alley(g, w, h) {
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#1a2230'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#39455c'; g.lineWidth = 1;                 // 砖缝
+    for (let y = h * 0.1; y < h; y += Math.max(7, h / 26)) {
+      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+    }
+    g.fillStyle = '#c4b27a';                                    // 门光
+    g.fillRect(w * 0.80, h * 0.30, w * 0.13, h * 0.55);
+    g.strokeStyle = '#8fa6cf'; g.globalAlpha = 0.6;             // 斜雨
+    for (let i = 0; i < w; i += 9) {
+      g.beginPath(); g.moveTo(i, 0); g.lineTo(i - h * 0.18, h); g.stroke();
+    }
+    g.globalAlpha = 1;
+  },
+  // 档案室：成排铁柜网格
+  archive(g, w, h) {
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    const cw = w / 7, ch = h / 5;
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 7; c++) {
+      g.fillStyle = (r === 2 && c === 3) ? '#0a0c11' : '#2c3445';  // 缺一格
+      g.fillRect(c * cw + 2, r * ch + 2, cw - 4, ch - 4);
+      g.fillStyle = '#586a8e';                                     // 抽屉拉手
+      g.fillRect(c * cw + cw * 0.4, r * ch + ch * 0.42, cw * 0.2, 3);
+    }
+  },
+};
+
+const BGART = (() => {
+  const cv = $('bgart');
+  if (!cv) return { show() {} };                  // 无画布环境（编辑器等）
+  const cx = cv.getContext('2d');
+  const off = document.createElement('canvas');
+  const octx = off.getContext('2d', { willReadFrequently: true });
+  let cur = null;
+
+  function render() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    if (!cur || !SCENES[cur]) return;
+    const W = cv.width, H = cv.height;
+    const w = Math.max(2, Math.ceil(W / 2)), h = Math.max(2, Math.ceil(H / 2));
+    off.width = w; off.height = h;
+    octx.clearRect(0, 0, w, h);
+    SCENES[cur](octx, w, h);
+    const src = octx.getImageData(0, 0, w, h).data;
+    const out = octx.createImageData(w, h), o = out.data;
+    const half = textHalfPx() / 2, cxc = w / 2, ramp = 36;      // 半分辨率坐标
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const lum = (src[i] * .299 + src[i + 1] * .587 + src[i + 2] * .114) * (src[i + 3] / 255);
+      const thr = (BAYER8[(y & 7) * 8 + (x & 7)] + 0.5) / 64 * 255;
+      if (lum <= thr) { o[i + 3] = 0; continue; }
+      const d = Math.abs(x - cxc) - half;                       // 中间留白
+      const m = d <= 0 ? 0 : Math.min(1, d / ramp);
+      if (m <= 0) { o[i + 3] = 0; continue; }
+      o[i] = 200; o[i + 1] = 210; o[i + 2] = 228; o[i + 3] = Math.round(125 * m);
+    }
+    octx.putImageData(out, 0, 0);
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(off, 0, 0, w, h, 0, 0, W, H);
+  }
+
+  function resize() { cv.width = innerWidth; cv.height = innerHeight; render(); }
+  addEventListener('resize', resize);
+  resize();
+
+  return {
+    show(name) {
+      name = name || null;
+      if (name === cur) return;
+      cv.style.opacity = 0;
+      setTimeout(() => {
+        cur = name;
+        render();
+        cv.style.opacity = cur ? 1 : 0;
+      }, 300);
+    },
   };
 })();
 
