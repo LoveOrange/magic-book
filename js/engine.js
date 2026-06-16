@@ -180,6 +180,49 @@ const $ = id => document.getElementById(id);
 const SAVE_FMT = 5;   // 5：存档改为结构化 log（不再快照 innerHTML）
 const GATE_HINT = '（总觉得……还有什么没查清的。）';
 
+/* ---------------- 效果总线（VM 产出 → 渲染端消费） ----------------
+ * VM 层的逻辑只「改 STATE + emit 效果」，绝不直接碰 DOM/音频；
+ * flush() 把缓冲的效果交给 applyEffects() 统一作画。这就是 Phase 2 的边界。
+ */
+let EFFECTS = [];
+function emit(e) { EFFECTS.push(e); }
+
+function flush() {
+  const es = EFFECTS; EFFECTS = [];
+  applyEffects(es);
+  updateMore(); updatePagebar();
+}
+function commit() { flush(); saveGame(); }   // 一次命令完成：作画 + 存档
+
+function applyEffects(list) {
+  for (const e of list) {
+    switch (e.k) {
+      case 'page':    mountPage(e.scene, e.sp, e.act, STATE.bookmarks.includes(e.idx)); break;
+      case 'view':    showPage(e.idx); break;
+      case 'log':     renderStatement(e.item.text, e.item.cls, e.pi, true); break;
+      case 'wordoff': greyWord(e.pi, e.id); break;
+      case 'scroll':  scrollNew(e.pi); break;
+      case 'item':    renderItems(); FX.sfx('get'); break;
+      case 'items':   renderItems(); break;
+      case 'clue':    FX.sfx('clue'); break;
+      case 'sfx':     FX.sfx(e.name); break;
+      case 'amb':     FX.amb(e.name); break;
+      case 'fx':      runFx(e.name, e.arg); break;
+      case 'hint':    hint(e.text, e.flash); break;
+      case 'gate':    FX.sfx('knock'); hint(e.msg, true); break;
+      case 'nav':     location.href = e.url; break;
+    }
+  }
+}
+function greyWord(pi, id) {
+  if (PAGES[pi]) PAGES[pi].el.querySelectorAll(`.w[data-act="${id}"]`)
+    .forEach(el => el.classList.add('used'));
+}
+function scrollNew(pi) {
+  const el = PAGES[pi] && PAGES[pi].el.lastElementChild;
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function saveKey() { return 'mb-save-' + (IS_DRAFT ? 'draft-' : '') + CH.meta.id; }
 
 function saveGame() {
@@ -240,18 +283,20 @@ function mountPage(scene, sp, act, bookmarked) {
   return PAGES.length - 1;
 }
 
-/* play 路径：新开一页 = 记一条日志 + 建 DOM（二者同序） */
+/* play 路径（VM）：新开一页 = 记日志 + emit page 效果（渲染端 mountPage） */
 function newPage(sid, sp) {
   const sc = CH.scenes[sid];
   STATE.log.push({ scene: sid, sp, act: sc.act, items: [] });
-  return mountPage(sid, sp, sc.act, false);
+  const idx = STATE.log.length - 1;
+  emit({ k: 'page', scene: sid, sp, act: sc.act, idx });
+  return idx;
 }
 
 function lastPageIdxOf(sid) {
-  for (let j = PAGES.length - 1; j >= 0; j--) {
-    if (PAGES[j].scene === sid) return j;
+  for (let j = STATE.log.length - 1; j >= 0; j--) {
+    if (STATE.log[j].scene === sid) return j;
   }
-  return PAGES.length - 1;
+  return STATE.log.length - 1;
 }
 
 function showPage(i) {
@@ -437,12 +482,13 @@ function renderStatement(text, extraCls, pi, animate) {
   return p;
 }
 
-/* 输出一行：记入结构化日志（存档的源），再渲染 */
-function sayLine(t, extraCls) {
-  const pi = curPageIdx >= 0 ? curPageIdx : PAGES.length - 1;
-  if (pi < 0 || !STATE.log[pi]) return { textContent: '' };
-  STATE.log[pi].items.push({ text: t, cls: extraCls || '' });
-  return renderStatement(t, extraCls || '', pi, true);
+/* 输出一行（VM）：记入结构化日志（存档的源）+ emit log 效果 */
+function logStatement(text, cls) {
+  const pi = curPageIdx >= 0 ? curPageIdx : STATE.log.length - 1;
+  if (pi < 0 || !STATE.log[pi]) return;
+  const item = { text, cls: cls || '' };
+  STATE.log[pi].items.push(item);
+  emit({ k: 'log', pi, item });
 }
 
 /* ---------------- 推进：页级节奏（一页文字一次性全显） ---------------- */
@@ -485,30 +531,26 @@ function runLines(lines, sid, pageIdx, word, cls) {
 
 function pageCls(sc) { return sc.props.style === 'coda' ? 'coda' : ''; }
 
-/* 解锁场景内的下一页（检查门槛） */
+/* 解锁场景内的下一页（VM，检查门槛） */
 function nextPage() {
   const sc = CH.scenes[STATE.scene];
   const np = sc.pages[STATE.sp + 1];
   if (!np) return;
   if (np.gate && !evalCond(np.gate.cond)) {
-    FX.sfx('knock');
-    hint(np.gate.msg || GATE_HINT, true);
+    emit({ k: 'gate', msg: np.gate.msg || GATE_HINT });
     return;
   }
   STATE.sp++;
   const idx = newPage(STATE.scene, STATE.sp);
-  showPage(idx);
-  if (runLines(np.lines, STATE.scene, idx, null, pageCls(sc)) !== 'goto') {
-    checkWhens();
-    saveGame();
-    updateMore(); updatePagebar();
-  }
+  emit({ k: 'view', idx });
+  if (runLines(np.lines, STATE.scene, idx, null, pageCls(sc)) !== 'goto') checkWhens();
 }
 
-/* 统一的「前进」：回翻时向后翻已读页 → 前沿解锁下一页 */
+/* 统一的「前进」（命令）：回翻时向后翻已读页（纯视图）→ 前沿解锁下一页（VM+提交） */
 function advance() {
   if (viewIdx >= 0 && viewIdx < PAGES.length - 1) { showPage(viewIdx + 1); return; }
   nextPage();
+  commit();
 }
 
 /* 「后退」：回看上一页（已解锁页之间自由翻动） */
@@ -531,15 +573,14 @@ function hasItem(id) { return STATE.items.includes(id); }
 function addItem(id) {
   if (hasItem(id) || !CH.items[id]) return;
   STATE.items.push(id);
-  renderItems();
-  FX.sfx('get');
-  sayLine('【获得：' + CH.items[id].name + '】', 'get');
+  emit({ k: 'item', id });
+  logStatement('【获得：' + CH.items[id].name + '】', 'get');
 }
 
 function removeItem(id) {
   STATE.items = STATE.items.filter(x => x !== id);
   if (selected === id) select(null);
-  renderItems();
+  emit({ k: 'items' });
 }
 
 function renderItems() {
@@ -567,8 +608,8 @@ function select(id) {
 function addClue(text) {
   if (STATE.clues.includes(text)) return;
   STATE.clues.push(text);
-  FX.sfx('clue');
-  sayLine('【线索：' + text + '】', 'clue');
+  emit({ k: 'clue' });
+  logStatement('【线索：' + text + '】', 'clue');
 }
 
 let hintTimer = null;
@@ -607,10 +648,10 @@ function execAction(t, cls) {
   if ((m = t.match(/^set\s+(\w+)/)))       { STATE.flags.add(m[1]); return; }
   if ((m = t.match(/^unset\s+(\w+)/)))     { STATE.flags.delete(m[1]); return; }
   if ((m = t.match(/^clue\s+(.+)/)))       { addClue(m[1]); return; }
-  if ((m = t.match(/^hint\s+(.+)/)))       { hint(m[1], true); return; }
-  if ((m = t.match(/^sfx\s+(\w+)/)))       { FX.sfx(m[1]); return; }
-  if ((m = t.match(/^amb\s+(\w+)/)))       { FX.amb(m[1]); return; }
-  if ((m = t.match(/^fx\s+(\w+)\s*(.*)/))) { runFx(m[1], m[2]); return; }
+  if ((m = t.match(/^hint\s+(.+)/)))       { emit({ k: 'hint', text: m[1], flash: true }); return; }
+  if ((m = t.match(/^sfx\s+(\w+)/)))       { emit({ k: 'sfx', name: m[1] }); return; }
+  if ((m = t.match(/^amb\s+(\w+)/)))       { emit({ k: 'amb', name: m[1] }); return; }
+  if ((m = t.match(/^fx\s+(\w+)\s*(.*)/))) { emit({ k: 'fx', name: m[1], arg: m[2] }); return; }
   if ((m = t.match(/^off\s*(\w*)/)))       { offWord(m[1] || currentWord); return; }
   if ((m = t.match(/^archive\s+(.+)/))) {
     const [title, body = ''] = m[1].split('|').map(s => s.trim());
@@ -618,46 +659,32 @@ function execAction(t, cls) {
     return;
   }
   if ((m = t.match(/^goto\s+(\w+)/)))      { enterScene(m[1]); return 'goto'; }
-  if ((m = t.match(/^nav\s+(\S+)/)))       { location.href = m[1]; return; }
-  return sayLine(t, cls).textContent.length;
+  if ((m = t.match(/^nav\s+(\S+)/)))       { emit({ k: 'nav', url: m[1] }); return; }
+  logStatement(t, cls); return;
 }
 
-/* 置灰一个词并记入 STATE.used（以页为范围，便于读档还原） */
+/* 置灰一个词（VM）：记入 STATE.used + emit wordoff（以页为范围，便于读档还原） */
 function offWord(id, pi) {
   if (!id) return;
   if (pi == null) pi = curPageIdx;
-  const rec = i => { const k = i + ':' + id; if (!STATE.used.includes(k)) STATE.used.push(k); };
-  if (pi != null && pi >= 0 && PAGES[pi]) {
-    PAGES[pi].el.querySelectorAll(`.w[data-act="${id}"]`).forEach(el => el.classList.add('used'));
-    rec(pi);
-  } else {
-    PAGES.forEach((p, i) => {                                  // 兜底：页号未知时全局置灰
-      let hit = false;
-      p.el.querySelectorAll(`.w[data-act="${id}"]`).forEach(el => { el.classList.add('used'); hit = true; });
-      if (hit) rec(i);
-    });
-  }
+  if (pi < 0) return;
+  const key = pi + ':' + id;
+  if (!STATE.used.includes(key)) STATE.used.push(key);
+  emit({ k: 'wordoff', pi, id });
 }
 
-function execBlock(block, sid, pageIdx) {
-  if (block.once) offWord(block.word, pageIdx); // 立即置灰，防止重复触发
-  const pageEl = PAGES[pageIdx] && PAGES[pageIdx].el;
-  const before = pageEl ? pageEl.lastElementChild : null;
-  const r = runLines(block.actions, sid, pageIdx, block.word);
-  if (r !== 'goto') {
-    /* 展开内容滚入视野 */
-    const first = before ? before.nextElementSibling
-                         : (pageEl && pageEl.firstElementChild);
-    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+/* 执行一个互动块（VM）：置灰 → 跑动作 → 非跳转则巡检触发器、滚动展开内容 */
+function execBlock(block, sid, pi) {
+  if (block.once) offWord(block.word, pi); // 立即置灰，防止重复触发
+  if (runLines(block.actions, sid, pi, block.word) !== 'goto') {
     checkWhens();
-    saveGame();
-    updateMore(); updatePagebar();
+    emit({ k: 'scroll', pi });
   }
 }
 
 /* 检查所有已解锁场景的自动触发（同步执行，可链式）；返回是否触发过 */
 function checkWhens() {
-  const unlocked = new Set(PAGES.map(p => p.scene));
+  const unlocked = new Set(STATE.log.map(p => p.scene));
   for (const sid of unlocked) {
     const sc = CH.scenes[sid];
     for (let i = 0; i < sc.whens.length; i++) {
@@ -677,19 +704,17 @@ function checkWhens() {
 
 /* ---------------- 场景 ---------------- */
 
+/* 进入场景（VM）：新开首页 + emit view/hint + 跑首页动作；调用方负责 commit() */
 function enterScene(id) {
   const sc = CH.scenes[id];
   if (!sc) { console.error('场景不存在：' + id); return; }
   STATE.scene = id;
   STATE.sp = 0;
   const idx = newPage(id, 0);
-  showPage(idx);
-  if (idx === 0) hint('点击发亮的词互动；点屏幕右侧翻下一页，左侧回上一页（正文区可自由划选）。', true);
-  if (runLines(sc.pages[0].lines, id, idx, null, pageCls(sc)) !== 'goto') {
-    checkWhens();
-    saveGame();
-    updateMore(); updatePagebar();
-  }
+  emit({ k: 'view', idx });
+  if (idx === 0) emit({ k: 'hint', flash: true,
+    text: '点击发亮的词互动；点屏幕右侧翻下一页，左侧回上一页（正文区可自由划选）。' });
+  if (runLines(sc.pages[0].lines, id, idx, null, pageCls(sc)) !== 'goto') checkWhens();
 }
 
 /* ---------------- 点击分发（全站唯一的点击监听器） ----------------
@@ -721,9 +746,10 @@ const UI_ACTIONS = {
   },
 };
 
+/* 点击互动词（命令）：定位页 → 跑块（VM）→ commit；空操作分支直接给提示 */
 function wordClick(el) {
   const pageEl = el.closest('.page');
-  const pageIdx = pageEl ? PAGES.findIndex(p => p.el === pageEl) : PAGES.length - 1;
+  const pi = pageEl ? PAGES.findIndex(p => p.el === pageEl) : PAGES.length - 1;
   const sid = pageEl ? pageEl.dataset.scene : STATE.scene;
   const sc = CH.scenes[sid];
   if (!sc) return;
@@ -731,18 +757,18 @@ function wordClick(el) {
   markSeen(sid, id);
   if (selected) {
     const block = sc.blocks[id + '@' + selected];
-    if (block) { select(null); execBlock(block, sid, pageIdx); }
+    if (block) { select(null); execBlock(block, sid, pi); }
     else {
       el.classList.remove('shake'); void el.offsetWidth;
       el.classList.add('shake');
       hint('（' + CH.items[selected].name + '对它没有反应。）', true);
     }
   } else if (sc.blocks[id]) {
-    execBlock(sc.blocks[id], sid, pageIdx);
+    execBlock(sc.blocks[id], sid, pi);
   } else if (Object.keys(sc.blocks).some(k => k.startsWith(id + '@'))) {
     hint('（直接点没有用，似乎需要装填什么。）', true);
   }
-  updatePagebar();
+  commit();
 }
 
 document.addEventListener('click', e => {
@@ -1172,8 +1198,8 @@ function restoreGame(save) {
   }
   renderItems();
   showPage(PAGES.length - 1);
-  checkWhens();
-  updateMore(); updatePagebar();
+  checkWhens();   // 读档后可能补触发；其 emit 由 flush 落地
+  flush();
 }
 
 /* 全量重置运行时（重新开始，免依赖刷新页面） */
@@ -1197,6 +1223,7 @@ function startNewGame() {
   resetState();
   $('cover').classList.add('hide');
   enterScene(CH.meta.start || CH.order[0]);
+  commit();
 }
 
 function continueGame() {
