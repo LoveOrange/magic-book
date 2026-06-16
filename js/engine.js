@@ -1030,10 +1030,11 @@ const FX = (() => {
   };
 })();
 
-/* ---------------- 背景画层：1-bit 抖动场景画（奥布拉丁风） ----------------
- * 场景属性 art: <名字> 引用内置画库。每个场景是一段灰度画法，经 8×8 Bayer
- * 有序抖动转为 1-bit 黑白点阵，再用「中间留白」遮罩裁出——只在正文两侧的
- * 边栏显现，不与文字争抢。画库由引擎随版本扩充（工坊剧本只能引名字）。
+/* ---------------- 背景画层：1-bit 抖动（真实素材，奥布拉丁风） ----------------
+ * 场景属性 art:<名字> 在 ART_IMAGES 里查一张真实插画素材；有图则载入 →
+ * 8×8 Bayer 有序抖动转 1-bit → 中间留白遮罩裁进正文两侧边栏；无图则留空
+ * （当前即此：背景保持干净）。程序化几何画法已弃用——细节不足到不了目标质感，
+ * 真正的 1-bit 场景靠这里喂真实素材（画师手绘 / AI 生成后入库）。
  */
 
 const BAYER8 = [
@@ -1043,69 +1044,11 @@ const BAYER8 = [
   15,47, 7,39,13,45, 5,37, 63,31,55,23,61,29,53,21,
 ];
 
-const SCENES = {
-  // 深夜办公室：上部一排百叶窗（竖向亮条），地平线，桌面剪影
-  office(g, w, h) {
-    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
-    const top = h * 0.10, wh = h * 0.34;
-    g.fillStyle = '#36405a'; g.fillRect(0, top, w, wh);         // 窗
-    for (let x = 0; x < w; x += Math.max(8, w / 38)) {
-      g.fillStyle = '#9fb2da'; g.fillRect(x, top, Math.max(3, w / 110), wh);
-    }
-    g.fillStyle = '#11151c'; g.fillRect(0, top + wh, w, h);     // 墙
-    g.fillStyle = '#1c2230'; g.fillRect(0, h * 0.70, w, h);     // 地
-    for (let i = 0; i < 4; i++) {                               // 工位剪影
-      const x = w * (0.08 + i * 0.27);
-      g.fillStyle = '#2b3346'; g.fillRect(x, h * 0.60, w * 0.16, h * 0.12);
-    }
-  },
-  // 系统终端：横向扫描线 + 中央柔光（中央会被遮罩裁掉，留边栏扫描线）
-  terminal(g, w, h) {
-    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
-    const grd = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.6);
-    grd.addColorStop(0, '#3f5e9a'); grd.addColorStop(1, '#05070c');
-    g.fillStyle = grd; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#7fa0d8';
-    for (let y = 0; y < h; y += Math.max(4, h / 70)) g.fillRect(0, y, w, 1);
-  },
-  // 审讯室：顶部吊灯光锥 + 两侧站立剪影
-  interro(g, w, h) {
-    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#9fb2da'; g.beginPath();
-    g.moveTo(w / 2, 0); g.lineTo(w * 0.18, h); g.lineTo(w * 0.82, h);
-    g.closePath(); g.globalAlpha = 0.5; g.fill(); g.globalAlpha = 1;
-    g.fillStyle = '#252d40';                                    // 两侧人影
-    g.fillRect(w * 0.06, h * 0.34, w * 0.12, h * 0.66);
-    g.fillRect(w * 0.82, h * 0.34, w * 0.12, h * 0.66);
-    g.fillStyle = '#161b26'; g.fillRect(0, h * 0.80, w, h);     // 地
-  },
-  // 当铺后巷：砖缝横线 + 斜雨 + 右侧亮着的门
-  alley(g, w, h) {
-    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#1a2230'; g.fillRect(0, 0, w, h);
-    g.strokeStyle = '#39455c'; g.lineWidth = 1;                 // 砖缝
-    for (let y = h * 0.1; y < h; y += Math.max(7, h / 26)) {
-      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
-    }
-    g.fillStyle = '#c4b27a';                                    // 门光
-    g.fillRect(w * 0.80, h * 0.30, w * 0.13, h * 0.55);
-    g.strokeStyle = '#8fa6cf'; g.globalAlpha = 0.6;             // 斜雨
-    for (let i = 0; i < w; i += 9) {
-      g.beginPath(); g.moveTo(i, 0); g.lineTo(i - h * 0.18, h); g.stroke();
-    }
-    g.globalAlpha = 1;
-  },
-  // 档案室：成排铁柜网格
-  archive(g, w, h) {
-    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
-    const cw = w / 7, ch = h / 5;
-    for (let r = 0; r < 5; r++) for (let c = 0; c < 7; c++) {
-      g.fillStyle = (r === 2 && c === 3) ? '#0a0c11' : '#2c3445';  // 缺一格
-      g.fillRect(c * cw + 2, r * ch + 2, cw - 4, ch - 4);
-      g.fillStyle = '#586a8e';                                     // 抽屉拉手
-      g.fillRect(c * cw + cw * 0.4, r * ch + ch * 0.42, cw * 0.2, 3);
-    }
-  },
+/* 素材登记表：art:<名> → 图片 URL。放进真实 1-bit 插画即自动生效。 */
+const ART_IMAGES = {
+  // office:   'art/office.png',
+  // interro:  'art/interro.png',
+  // alley:    'art/alley.png',
 };
 
 const BGART = (() => {
@@ -1114,16 +1057,19 @@ const BGART = (() => {
   const cx = cv.getContext('2d');
   const off = document.createElement('canvas');
   const octx = off.getContext('2d', { willReadFrequently: true });
-  let cur = null;
+  let cur = null, curImg = null;
 
-  function render() {
-    cx.clearRect(0, 0, cv.width, cv.height);
-    if (!cur || !SCENES[cur]) return;
+  function clear() { cx.clearRect(0, 0, cv.width, cv.height); cv.style.opacity = 0; }
+
+  /* 把一张图抖成 1-bit、裁进两侧边栏 */
+  function dither(img) {
     const W = cv.width, H = cv.height;
     const w = Math.max(2, Math.ceil(W / 2)), h = Math.max(2, Math.ceil(H / 2));
     off.width = w; off.height = h;
     octx.clearRect(0, 0, w, h);
-    SCENES[cur](octx, w, h);
+    const s = Math.max(w / img.width, h / img.height);          // 等比铺满
+    octx.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2,
+      img.width * s, img.height * s);
     const src = octx.getImageData(0, 0, w, h).data;
     const out = octx.createImageData(w, h), o = out.data;
     const half = textHalfPx() / 2, cxc = w / 2, ramp = 36;      // 半分辨率坐标
@@ -1135,14 +1081,16 @@ const BGART = (() => {
       const d = Math.abs(x - cxc) - half;                       // 中间留白
       const m = d <= 0 ? 0 : Math.min(1, d / ramp);
       if (m <= 0) { o[i + 3] = 0; continue; }
-      o[i] = 200; o[i + 1] = 210; o[i + 2] = 228; o[i + 3] = Math.round(125 * m);
+      o[i] = 210; o[i + 1] = 218; o[i + 2] = 232; o[i + 3] = Math.round(150 * m);
     }
     octx.putImageData(out, 0, 0);
     cx.imageSmoothingEnabled = false;
+    cx.clearRect(0, 0, W, H);
     cx.drawImage(off, 0, 0, w, h, 0, 0, W, H);
+    cv.style.opacity = 1;
   }
 
-  function resize() { cv.width = innerWidth; cv.height = innerHeight; render(); }
+  function resize() { cv.width = innerWidth; cv.height = innerHeight; if (curImg) dither(curImg); }
   addEventListener('resize', resize);
   resize();
 
@@ -1150,12 +1098,12 @@ const BGART = (() => {
     show(name) {
       name = name || null;
       if (name === cur) return;
-      cv.style.opacity = 0;
-      setTimeout(() => {
-        cur = name;
-        render();
-        cv.style.opacity = cur ? 1 : 0;
-      }, 300);
+      cur = name; curImg = null;
+      const url = ART_IMAGES[name];
+      if (!url) { clear(); return; }              // 无素材 → 背景干净
+      const img = new Image();
+      img.onload = () => { if (cur === name) { curImg = img; dither(img); } };
+      img.src = url;
     },
   };
 })();
