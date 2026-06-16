@@ -223,6 +223,50 @@ function scrollNew(pi) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+/* ---------------- 命令层（输入 → VM 的唯一入口） ----------------
+ * 改变叙事状态只能经 dispatch(command)：清空效果缓冲 → reduce 改 STATE+emit →
+ * commit 落地（作画+存档）。纯视图操作（翻已读页/页码跳转/选弹仓）不改 STATE，
+ * 不走这里。这就是 VM 的对外契约：命令进、效果出、单一漏斗。
+ */
+const Cmd = {
+  start:       ()             => ({ t: 'start' }),
+  turnForward: ()             => ({ t: 'turnForward' }),
+  clickWord:   (pi, wordId)   => ({ t: 'clickWord', pi, wordId }),
+  useItem:     (item, pi, wordId) => ({ t: 'useItem', item, pi, wordId }),
+};
+
+/* reduce：把一个 command 落到 STATE（并 emit 效果）。无 DOM。
+ * 注：当前实现在单一被引擎拥有的 STATE 上就地变更（非不可变线程化），
+ * 但对外契约——「命令进、效果出、dispatch 单漏斗」——已成立。 */
+function reduce(cmd) {
+  switch (cmd.t) {
+    case 'start':
+      enterScene(CH.meta.start || CH.order[0]);
+      break;
+    case 'turnForward':
+      nextPage();
+      break;
+    case 'clickWord': {
+      const sid = STATE.log[cmd.pi].scene;
+      const block = CH.scenes[sid].blocks[cmd.wordId];
+      if (block) execBlock(block, sid, cmd.pi);
+      break;
+    }
+    case 'useItem': {
+      const sid = STATE.log[cmd.pi].scene;
+      const block = CH.scenes[sid].blocks[cmd.wordId + '@' + cmd.item];
+      if (block) execBlock(block, sid, cmd.pi);
+      break;
+    }
+  }
+}
+
+function dispatch(cmd) {
+  EFFECTS = [];
+  reduce(cmd);
+  commit();   // flush（作画+刷新页码/状态灯）+ 存档
+}
+
 function saveKey() { return 'mb-save-' + (IS_DRAFT ? 'draft-' : '') + CH.meta.id; }
 
 function saveGame() {
@@ -546,11 +590,10 @@ function nextPage() {
   if (runLines(np.lines, STATE.scene, idx, null, pageCls(sc)) !== 'goto') checkWhens();
 }
 
-/* 统一的「前进」（命令）：回翻时向后翻已读页（纯视图）→ 前沿解锁下一页（VM+提交） */
+/* 「前进」：回翻时向后翻已读页（纯视图）→ 前沿解锁下一页（命令 turnForward） */
 function advance() {
   if (viewIdx >= 0 && viewIdx < PAGES.length - 1) { showPage(viewIdx + 1); return; }
-  nextPage();
-  commit();
+  dispatch(Cmd.turnForward());
 }
 
 /* 「后退」：回看上一页（已解锁页之间自由翻动） */
@@ -756,19 +799,19 @@ function wordClick(el) {
   const id = el.dataset.act;
   markSeen(sid, id);
   if (selected) {
-    const block = sc.blocks[id + '@' + selected];
-    if (block) { select(null); execBlock(block, sid, pi); }
-    else {
-      el.classList.remove('shake'); void el.offsetWidth;
-      el.classList.add('shake');
-      hint('（' + CH.items[selected].name + '对它没有反应。）', true);
+    if (sc.blocks[id + '@' + selected]) {
+      const item = selected; select(null);
+      dispatch(Cmd.useItem(item, pi, id)); return;
     }
-  } else if (sc.blocks[id]) {
-    execBlock(sc.blocks[id], sid, pi);
-  } else if (Object.keys(sc.blocks).some(k => k.startsWith(id + '@'))) {
+    el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+    hint('（' + CH.items[selected].name + '对它没有反应。）', true);
+    updatePagebar(); return;
+  }
+  if (sc.blocks[id]) { dispatch(Cmd.clickWord(pi, id)); return; }
+  if (Object.keys(sc.blocks).some(k => k.startsWith(id + '@'))) {
     hint('（直接点没有用，似乎需要装填什么。）', true);
   }
-  commit();
+  updatePagebar();
 }
 
 document.addEventListener('click', e => {
@@ -1222,8 +1265,7 @@ function startNewGame() {
   localStorage.removeItem(saveKey());
   resetState();
   $('cover').classList.add('hide');
-  enterScene(CH.meta.start || CH.order[0]);
-  commit();
+  dispatch(Cmd.start());
 }
 
 function continueGame() {
