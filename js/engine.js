@@ -1044,12 +1044,91 @@ const BAYER8 = [
   15,47, 7,39,13,45, 5,37, 63,31,55,23,61,29,53,21,
 ];
 
-/* 素材登记表：art:<名> → 图片 URL。放进真实 1-bit 插画即自动生效。 */
+/* 素材登记表：art:<名> → 真实 1-bit 插画 URL（优先于程序化场景）。 */
 const ART_IMAGES = {
-  // office:   'art/office.png',
-  // interro:  'art/interro.png',
-  // alley:    'art/alley.png',
+  // office: 'art/office.png',
 };
+
+/* 程序化场景：关键——全用光影渐变（连续调），抖动才有层次（纯色块会抖成网格）。
+ * 画师/AI 出的真实素材登记到 ART_IMAGES 后会取代对应场景。 */
+const SCENES = {
+  // 深夜侦探办公室：左窗月光+雨，右台灯暖光晕，前景桌面
+  office(g, w, h) {
+    let wall = g.createLinearGradient(0, 0, 0, h);
+    wall.addColorStop(0, '#222a3a'); wall.addColorStop(.6, '#10141d'); wall.addColorStop(1, '#06080d');
+    g.fillStyle = wall; g.fillRect(0, 0, w, h);
+    const wx = w * .05, wy = h * .12, ww = w * .26, wh = h * .46;       // 窗
+    let win = g.createLinearGradient(0, wy, 0, wy + wh);
+    win.addColorStop(0, '#8392b0'); win.addColorStop(.5, '#4d597a'); win.addColorStop(1, '#2b3447');
+    g.fillStyle = win; g.fillRect(wx, wy, ww, wh);
+    g.strokeStyle = 'rgba(200,212,235,.4)'; g.lineWidth = 1;            // 雨
+    for (let i = 0; i < 60; i++) { const rx = wx + Math.random() * ww, ry = wy + Math.random() * wh; g.beginPath(); g.moveTo(rx, ry); g.lineTo(rx - 6, ry + 14); g.stroke(); }
+    g.fillStyle = '#06080d'; g.fillRect(wx + ww / 2 - 2, wy, 4, wh); g.fillRect(wx, wy + wh / 2 - 2, ww, 4);
+    g.strokeStyle = '#06080d'; g.lineWidth = 5; g.strokeRect(wx, wy, ww, wh);
+    const lx = w * .80, ly = h * .50;                                  // 台灯暖光晕
+    let glow = g.createRadialGradient(lx, ly, 0, lx, ly, w * .30);
+    glow.addColorStop(0, '#e8eef8'); glow.addColorStop(.35, '#7a89a8'); glow.addColorStop(1, 'rgba(6,8,13,0)');
+    g.globalCompositeOperation = 'lighter'; g.fillStyle = glow; g.fillRect(0, 0, w, h); g.globalCompositeOperation = 'source-over';
+    let desk = g.createLinearGradient(0, h * .66, 0, h);                // 前景桌面
+    desk.addColorStop(0, '#39435a'); desk.addColorStop(1, '#080b11');
+    g.fillStyle = desk; g.fillRect(0, h * .70, w, h);
+    g.fillStyle = '#04060a';                                           // 台灯剪影
+    g.fillRect(lx - 3, ly, 6, h * .22);
+    g.beginPath(); g.moveTo(lx - w * .05, ly); g.lineTo(lx + w * .05, ly); g.lineTo(lx + w * .03, ly - h * .07); g.lineTo(lx - w * .03, ly - h * .07); g.closePath(); g.fill();
+  },
+  // 审讯室：顶灯光锥打在桌面，两侧黑暗中的人影
+  interro(g, w, h) {
+    g.fillStyle = '#06080c'; g.fillRect(0, 0, w, h);
+    const cx0 = w * .5;
+    let cone = g.createRadialGradient(cx0, h * .12, 0, cx0, h * .62, h * .7);
+    cone.addColorStop(0, '#cfd8ea'); cone.addColorStop(.5, '#4a5670'); cone.addColorStop(1, 'rgba(6,8,12,0)');
+    g.fillStyle = cone; g.beginPath(); g.moveTo(cx0, 0); g.lineTo(w * .12, h); g.lineTo(w * .88, h); g.closePath(); g.fill();
+    let tbl = g.createLinearGradient(0, h * .6, 0, h * .78);            // 桌面亮台
+    tbl.addColorStop(0, '#aab6cf'); tbl.addColorStop(1, '#3a4156');
+    g.fillStyle = tbl; g.fillRect(w * .3, h * .6, w * .4, h * .12);
+    g.fillStyle = '#0a0e16';                                           // 两侧人影
+    g.beginPath(); g.ellipse(w * .12, h * .42, w * .07, h * .14, 0, 0, 7); g.fill();
+    g.fillRect(w * .05, h * .55, w * .14, h * .45);
+    g.beginPath(); g.ellipse(w * .88, h * .42, w * .07, h * .14, 0, 0, 7); g.fill();
+    g.fillRect(w * .81, h * .55, w * .14, h * .45);
+  },
+  // 当铺后巷：右侧亮着的门，砖墙渐变，斜雨
+  alley(g, w, h) {
+    let wall = g.createLinearGradient(0, 0, w, 0);
+    wall.addColorStop(0, '#10151e'); wall.addColorStop(.7, '#1a2230'); wall.addColorStop(1, '#39455c');
+    g.fillStyle = wall; g.fillRect(0, 0, w, h);
+    const dx = w * .72, dy = h * .26, dw = w * .16, dh = h * .56;       // 门光
+    let door = g.createLinearGradient(dx, 0, dx + dw, 0);
+    door.addColorStop(0, '#e7d9a4'); door.addColorStop(1, '#9a8a55');
+    g.fillStyle = door; g.fillRect(dx, dy, dw, dh);
+    let spill = g.createRadialGradient(dx, h * .55, 0, dx, h * .55, w * .4);
+    spill.addColorStop(0, 'rgba(231,217,164,.5)'); spill.addColorStop(1, 'rgba(6,8,12,0)');
+    g.globalCompositeOperation = 'lighter'; g.fillStyle = spill; g.fillRect(0, 0, w, h); g.globalCompositeOperation = 'source-over';
+    g.strokeStyle = 'rgba(180,195,225,.35)'; g.lineWidth = 1;          // 斜雨
+    for (let i = 0; i < w; i += 7) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i - h * .16, h); g.stroke(); }
+  },
+  // 系统终端：中央屏幕柔光 + 扫描线
+  terminal(g, w, h) {
+    g.fillStyle = '#05070c'; g.fillRect(0, 0, w, h);
+    let scr = g.createRadialGradient(w * .5, h * .45, 0, w * .5, h * .45, w * .5);
+    scr.addColorStop(0, '#3a5d96'); scr.addColorStop(.6, '#12203a'); scr.addColorStop(1, '#05070c');
+    g.fillStyle = scr; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(5,7,12,.55)';
+    for (let y = 0; y < h; y += 4) g.fillRect(0, y, w, 2);
+  },
+  // 档案室：纵深排柜，顶部环境光
+  archive(g, w, h) {
+    let amb = g.createLinearGradient(0, 0, 0, h);
+    amb.addColorStop(0, '#2a3346'); amb.addColorStop(1, '#080b11');
+    g.fillStyle = amb; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#04060a';
+    for (let c = 0; c <= 8; c++) { const x = w * (c / 8); g.fillRect(x - w * .015, h * .12, w * .03, h * .7); }
+    g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 2;
+    for (let r = 1; r < 5; r++) { const y = h * .12 + (h * .7) * (r / 5); g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+  },
+};
+
+const SCENE_OPACITY = 0.5;   // 背景画整体不透明度（文字在其上仍清晰）
 
 const BGART = (() => {
   const cv = $('bgart');
@@ -1057,53 +1136,62 @@ const BGART = (() => {
   const cx = cv.getContext('2d');
   const off = document.createElement('canvas');
   const octx = off.getContext('2d', { willReadFrequently: true });
-  let cur = null, curImg = null;
+  let cur = null;
 
-  function clear() { cx.clearRect(0, 0, cv.width, cv.height); cv.style.opacity = 0; }
+  function paintSource(name, w, h) {
+    octx.clearRect(0, 0, w, h);
+    const img = cur && cur._img;
+    if (img) { const s = Math.max(w / img.width, h / img.height);
+      octx.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2, img.width * s, img.height * s); return true; }
+    if (SCENES[name]) { SCENES[name](octx, w, h); return true; }
+    return false;
+  }
 
-  /* 把一张图抖成 1-bit、裁进两侧边栏 */
-  function dither(img) {
+  /* 抖成 1-bit、铺满全屏；正文列加一道阅读暗带保证可读 */
+  function render() {
+    cx.clearRect(0, 0, cv.width, cv.height);
+    const name = cur && cur.name;
+    if (!name) { cv.style.opacity = 0; return; }
     const W = cv.width, H = cv.height;
     const w = Math.max(2, Math.ceil(W / 2)), h = Math.max(2, Math.ceil(H / 2));
     off.width = w; off.height = h;
-    octx.clearRect(0, 0, w, h);
-    const s = Math.max(w / img.width, h / img.height);          // 等比铺满
-    octx.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2,
-      img.width * s, img.height * s);
+    if (!paintSource(name, w, h)) { cv.style.opacity = 0; return; }
     const src = octx.getImageData(0, 0, w, h).data;
     const out = octx.createImageData(w, h), o = out.data;
-    const half = textHalfPx() / 2, cxc = w / 2, ramp = 36;      // 半分辨率坐标
+    const half = textHalfPx() / 2, cxc = w / 2, ramp = 46;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
-      const lum = (src[i] * .299 + src[i + 1] * .587 + src[i + 2] * .114) * (src[i + 3] / 255);
+      let lum = src[i] * .299 + src[i + 1] * .587 + src[i + 2] * .114;
+      lum = Math.max(0, Math.min(255, (lum - 128) * 1.25 + 128));      // 提对比
       const thr = (BAYER8[(y & 7) * 8 + (x & 7)] + 0.5) / 64 * 255;
       if (lum <= thr) { o[i + 3] = 0; continue; }
-      const d = Math.abs(x - cxc) - half;                       // 中间留白
-      const m = d <= 0 ? 0 : Math.min(1, d / ramp);
-      if (m <= 0) { o[i + 3] = 0; continue; }
-      o[i] = 210; o[i + 1] = 218; o[i + 2] = 232; o[i + 3] = Math.round(150 * m);
+      const d = Math.abs(x - cxc) - half;                             // 正文区压暗
+      const dim = d <= 0 ? 0.22 : Math.min(1, 0.22 + (d / ramp) * 0.78);
+      o[i] = 222; o[i + 1] = 228; o[i + 2] = 238; o[i + 3] = Math.round(255 * dim);
     }
     octx.putImageData(out, 0, 0);
     cx.imageSmoothingEnabled = false;
-    cx.clearRect(0, 0, W, H);
     cx.drawImage(off, 0, 0, w, h, 0, 0, W, H);
-    cv.style.opacity = 1;
+    cv.style.opacity = SCENE_OPACITY;
   }
 
-  function resize() { cv.width = innerWidth; cv.height = innerHeight; if (curImg) dither(curImg); }
+  function resize() { cv.width = innerWidth; cv.height = innerHeight; render(); }
   addEventListener('resize', resize);
   resize();
 
   return {
     show(name) {
       name = name || null;
-      if (name === cur) return;
-      cur = name; curImg = null;
+      if (cur && cur.name === name) return;
+      if (!name) { cur = null; cv.style.opacity = 0; cx.clearRect(0, 0, cv.width, cv.height); return; }
+      cur = { name, _img: null };
       const url = ART_IMAGES[name];
-      if (!url) { clear(); return; }              // 无素材 → 背景干净
-      const img = new Image();
-      img.onload = () => { if (cur === name) { curImg = img; dither(img); } };
-      img.src = url;
+      if (url) {                                  // 真实素材：载入后再抖
+        const img = new Image();
+        img.onload = () => { if (cur && cur.name === name) { cur._img = img; render(); } };
+        img.src = url;
+      }
+      render();                                   // 程序化场景：立即抖
     },
   };
 })();
