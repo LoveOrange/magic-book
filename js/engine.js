@@ -488,12 +488,13 @@ function fmt(s) {
 function renderStatement(text, extraCls, pi, animate) {
   const page = PAGES[pi];
   if (!page) return { textContent: '' };
-  let t = text;
-  if (t.startsWith(': ')) t = t.slice(2); // 块内文本行的可选前缀
+  let t = text, narr = false;
+  if (t.startsWith(': ')) { t = t.slice(2); narr = true; } // `: ` 前缀＝强制旁白
   const p = document.createElement('p');
   let cls = extraCls || '', m;
   if (t.startsWith('! ')) { cls += ' obj'; t = t.slice(2); }
-  else if ((m = t.match(/^([一-龥A-Za-z0-9·]{1,10})(（内心）|\(内心\))?\s*[:：]\s*(.+)$/))) {
+  // 仅非旁白行才尝试「说话人: 台词」解析（旁白里可含全角冒号，不应误判为对话）
+  else if (!narr && (m = t.match(/^([一-龥A-Za-z0-9·]{1,8})(（内心）|\(内心\))?\s*[:：]\s*(.+)$/))) {
     if (m[2]) { cls += ' think'; t = m[3]; }
     else {
       cls += ' speech';
